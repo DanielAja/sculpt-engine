@@ -80,4 +80,11 @@ cd ~/code/sculpt-engine && export PATH=$HOME/.cargo/bin:$PATH
 ./target/release/examples/viewer --bench [--big]                              # frame time
 ```
 
-Rust 1.99.1 was installed with rustup (`--no-modify-path`), so put `$HOME/.cargo/bin` on PATH first.
+Rust 1.99.1 was installed with rustup (`--no-modify-path`), so put `$HOME/.cargo/bin` on PATH first. Targets installed: wasm32, iOS and simulator, visionOS and simulator, Android arm64 and x86_64.
+
+## Next (E4, Apple)
+
+1. Branch `e4-apple`. Add an `ffi` feature (uniffi 0.32, thiserror, pollster, png, raw-window-handle), `uniffi::setup_scaffolding!()` in `lib.rs`, `pub mod ffi` behind it. `src/ffi.rs` is already written (`EngineView` with `with_metal_layer`, `with_android_window`, `offscreen`, the `Session` calls, `snapshot_png`, and `render_snapshot` for Dream Builder) but has **never been compiled**.
+2. `apple/build-xcframework.sh`: `cargo rustc --crate-type staticlib --features ffi` for aarch64-apple-ios, aarch64-apple-ios-sim, aarch64-apple-darwin, aarch64-apple-visionos, aarch64-apple-visionos-sim; uniffi-bindgen Swift; `xcodebuild -create-xcframework` (through the heavy gate, release Xcode only).
+3. Sample SwiftUI host (`apple/Sample`, a `UIViewRepresentable` with a `CAMetalLayer` and `CADisplayLink`), built for one iPad simulator of my own (deleted afterwards), plus an offscreen visionOS snapshot check.
+4. Update the Dream Builder section here with the exact `Package.swift` binary target lines.
