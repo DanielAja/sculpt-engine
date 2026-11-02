@@ -51,6 +51,13 @@ pub struct Scratch {
     new_pos: Vec<Vec3>,
 }
 
+impl Scratch {
+    /// Pre-sized for a mesh of `n` vertices, so the first dab doesn't allocate.
+    pub fn new(n: usize) -> Scratch {
+        Scratch { stamp: Stamp::new(n), ..Default::default() }
+    }
+}
+
 /// Footprints at or above this size are split across threads.
 const PARALLEL_MIN: usize = 4096;
 
@@ -249,7 +256,7 @@ mod tests {
     #[test]
     fn threads_do_not_change_the_result() {
         let base = SculptMesh::from_mesh(&uv_sphere(10.0, 256, 128));
-        let p = params(BrushKind::Smooth, 8.0, 0.8);
+        let p = params(BrushKind::Smooth, 14.0, 0.8);
         let one = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
         let four = rayon::ThreadPoolBuilder::new().num_threads(4).build().unwrap();
         let mut a = base.clone();
@@ -257,6 +264,7 @@ mod tests {
         let ma = one.install(|| run(&mut a, Vec3::new(10.0, 0.0, 0.0), p));
         let mb = four.install(|| run(&mut b, Vec3::new(10.0, 0.0, 0.0), p));
         assert!(ma.len() >= PARALLEL_MIN, "footprint too small to exercise threads: {}", ma.len());
+        assert_eq!(ma, mb);
         assert_eq!(a.positions, b.positions);
     }
 }

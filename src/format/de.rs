@@ -124,10 +124,10 @@ impl<'de> Deserialize<'de> for DateDe {
             fn visit_f64<E>(self, v: f64) -> Result<DateDe, E> {
                 Ok(DateDe(iso_from_unix((v + 978_307_200.0).floor() as i64)))
             }
-            fn visit_i64<E>(self, v: i64) -> Result<DateDe, E> {
+            fn visit_i64<E: de::Error>(self, v: i64) -> Result<DateDe, E> {
                 self.visit_f64(v as f64)
             }
-            fn visit_u64<E>(self, v: u64) -> Result<DateDe, E> {
+            fn visit_u64<E: de::Error>(self, v: u64) -> Result<DateDe, E> {
                 self.visit_f64(v as f64)
             }
             fn visit_str<E: de::Error>(self, s: &str) -> Result<DateDe, E> {

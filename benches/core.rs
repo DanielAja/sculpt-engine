@@ -38,12 +38,12 @@ fn benches(c: &mut Criterion) {
             let p = BrushParams { kind, radius, strength: 0.5, symmetry: [false; 3] };
             c.bench_function(&format!("dab/{kind:?}/{name}").to_lowercase(), |b| {
                 b.iter_batched(
-                    || (s1m.clone(), Scratch::default(), Vec::new()),
+                    || (s1m.clone(), Scratch::new(s1m.positions.len()), Vec::with_capacity(65536)),
                     |(mut m, mut s, mut moved)| {
                         dab(&mut m, &bvh, &mut s, Vec3::new(50.0, 0.0, 0.0), &p, &mut moved);
                         let vs: Vec<u32> = moved.iter().map(|x| x.0).collect();
                         m.update_normals(&vs);
-                        moved.len()
+                        (m, s, moved) // dropped outside the timed part
                     },
                     BatchSize::LargeInput,
                 )
