@@ -1,0 +1,30 @@
+[package]
+name = "sculpt-engine"
+version = "0.1.0"
+edition = "2024"
+license = "LicenseRef-AJA-Digital"
+description = "Shared render and sculpt engine for Sculptor and Dream Builder"
+publish = false
+
+[lib]
+crate-type = ["rlib", "staticlib", "cdylib"]
+
+[features]
+default = ["threads"]
+threads = ["dep:rayon"]
+
+[dependencies]
+glam = "0.34"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rayon = { version = "1.12", optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "core"
+harness = false
+
+[profile.release]
+debug = 1
