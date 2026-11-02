@@ -250,6 +250,7 @@ Each milestone is a local branch `eN-...`, merged into `main` with `--no-ff` onc
 | | Scope | Done when |
 |---|---|---|
 | **E1** | `SculptMesh`, BVH, brushes with symmetry and rayon, strokes and history, `.sculpt` codec. Pure Rust. | Unit tests pass; golden `project.sculpt` re-encodes byte for byte; criterion benchmarks recorded. |
+| **E1b** | Dyntopo (Section 5.3) with dynamic local adjacency, so a dab never rebuilds the whole mesh or BVH. Moved out of E1 so the renderer is not blocked. | Manifold kept, no flipped triangles, Euler characteristic kept; dab budget met. |
 | **E2** | wgpu renderer: PBR, baked IBL, shadow map with PCF, SSAO, AgX and ACES, MSAA, overlays (grid); native macOS demo window (winit) that opens a `.sculpt` and sculpts with the mouse. | Golden image tests pass on Metal; demo screenshots reviewed; frame times recorded. |
 | **E3** | wasm build (WebGPU and WebGL2), wasm-bindgen API, demo page. | Demo runs in Chrome on WebGPU and with WebGPU disabled (WebGL2); wasm size recorded. |
 | **E4** | Apple xcframework (iOS, iPadOS, macOS, visionOS, simulators) with uniffi Swift bindings; sample SwiftUI host view (`CAMetalLayer`). | Sample builds for every slice and runs in one iPad simulator; visionOS snapshot renders offscreen. |
