@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sculpt-engine web demo</title>
+<style>
+  :root { color-scheme: light dark; --bg: #eeeef0; --fg: #1d1d1f; --panel: rgba(255,255,255,.85); }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1c1c1e; --fg: #f2f2f7; --panel: rgba(44,44,46,.85); } }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 14px -apple-system, system-ui, sans-serif; }
+  canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
+  #bar { position: fixed; top: 12px; left: 12px; right: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+         padding: 8px 12px; border-radius: 12px; background: var(--panel); backdrop-filter: blur(12px); }
+  #bar button, #bar select, #bar label { font: inherit; }
+  #bar button[aria-pressed=true] { outline: 2px solid #ff7a1a; }
+  #status { margin-left: auto; opacity: .7; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="3D sculpting viewport"></canvas>
+<div id="bar" role="toolbar" aria-label="Sculpt tools">
+  <button data-kind="draw" aria-pressed="true">Draw</button>
+  <button data-kind="inflate">Inflate</button>
+  <button data-kind="smooth">Smooth</button>
+  <button data-kind="flatten">Flatten</button>
+  <label>Radius <input id="radius" type="range" min="1" max="20" step="0.5" value="4"></label>
+  <label><input id="sym" type="checkbox" checked> X symmetry</label>
+  <select id="look" aria-label="Look"><option value="agx">AgX</option><option value="aces">ACES</option><option value="linear">Studio</option></select>
+  <button id="undo">Undo</button><button id="redo">Redo</button>
+  <label>Open <input id="file" type="file" accept=".sculpt"></label>
+  <span id="status">loading</span>
+</div>
+<script type="module" src="./main.js"></script>
+</body>
+</html>

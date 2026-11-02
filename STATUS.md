@@ -10,7 +10,8 @@ Remote: github.com/DanielAja/sculpt-engine (private). `main` and each milestone 
 | E1 core | Done, merged. 19 unit tests, including the byte-for-byte re-encode of the golden `project.sculpt`. Benchmarks below. |
 | E1b dyntopo | Not started (split out of E1 so the renderer isn't blocked). |
 | E2 renderer | Done, merged. wgpu 30 on Metal: PBR (GGX, multiscatter), CPU-baked IBL (SH9 plus prefiltered cube plus BRDF LUT), shadow map with rotated Poisson PCF and a ground shadow catcher, half-res SSAO, AgX / ACES / Studio tone maps, 4x MSAA, grid. `Session` is the one host API (open, pick, sculpt, undo, save). Native winit demo. 2 golden image tests and 24 unit tests. |
-| E3 to E7 | Not started. |
+| E3 wasm | Done, merged. `web` feature, `WebEngine` (wasm-bindgen) over `Session`, demo page `web/` (pointer, pen pressure, undo, open `.sculpt`, look picker). Runs on WebGPU and on WebGL2 (`?webgl`). |
+| E4 to E7 | Not started. |
 
 ### E1 benchmarks (M-class Mac, shared machine, load 15 to 28, `cargo bench --bench core`)
 
@@ -40,6 +41,23 @@ Screenshots (all reviewed): `docs/screenshots/e2/window-project.png` (live Metal
 Bugs found by looking at the renders: prepass normals picked up the view translation through the normal matrix's w (a hard SSAO band across the sphere), and forced smooth display smeared flat objects (the engine now shows each mesh with its own `smoothShading`, as Sculptor does).
 
 Known gaps in E2: host overlays (gizmo, edit cage) are not drawn yet (the line pipeline exists; the API is E4); modifiers are not evaluated when the engine opens a project by itself (hosts pass evaluated meshes); flat shaded meshes re-upload every corner per dab.
+
+### E3 web numbers (headless Chrome, Apple M4)
+
+| | WebGPU | WebGL2 (ANGLE, Metal) |
+|---|---|---|
+| wasm size | 2,194,161 bytes raw, 889,777 gzip, 693,316 brotli (budget: 3 MB raw, 1 MB brotli) | same module |
+| Startup (GPU, IBL bake, sphere, BVH) | 177 ms | 214 ms |
+| Stroke on 65 k triangles (begin, 41 moves, end incl. `setMesh` JSON) | 110 ms (~2.7 ms per move) | 91 ms (~2.2 ms per move) |
+| Frame rate | vsync bound (60 fps headless) | vsync bound |
+
+Screenshots (reviewed): `docs/screenshots/e3/webgpu.png`, `docs/screenshots/e3/webgpu-sculpt.png`, `docs/screenshots/e3/webgl2-sculpt.png` (identical images).
+
+Found by the WebGL2 run: GLSL ES can't read depth textures with `textureLoad`, so the SSAO prepass now packs an octahedral normal and a split linear depth (about 22 bits) into one `rgba16float` target. This is used on every tier.
+
+Build and run: `~/code/ios27-duo-readiness/plans/heavy_gate.sh && web/build.sh`, serve `web/` (any static server with the `application/wasm` type), open `/` or `/?webgl`. `node tools/browser-shot.mjs <url> out.png [--sculpt] [--headed]` takes the screenshots. Tools installed for E3: `wasm-bindgen-cli 0.2.130` (cargo install), `binaryen 133` (Homebrew).
+
+For the Sculptor web port (`~/code/sculptor.web`): `WebEngine` covers the `Renderer` seam (draw, `pick`) and the brush calls of `ModelEngine` (`sculptBegin`, `sculptMove`, `sculptEnd` returning the `setMesh` command to `apply`). Mapping in E7.
 
 ## Dream Builder coordination (visionOS option (a))
 

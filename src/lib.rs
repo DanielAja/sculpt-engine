@@ -10,6 +10,8 @@ pub mod mesh;
 pub mod render;
 #[cfg(feature = "render")]
 pub mod session;
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+pub mod web;
 pub mod stroke;
 
 pub use glam;
