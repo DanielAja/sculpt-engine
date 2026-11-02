@@ -53,11 +53,13 @@ fn vs_shadow(v: VIn) -> @builtin(position) vec4f {
     return F.light_vp * O.model * vec4f(v.pos, 1.0);
 }
 
-// ---- prepass: view space normal for SSAO (depth goes to the depth attachment) ----
+// ---- prepass: view space normal and depth for SSAO, in one rgba16float target that every tier can read:
+// octahedral normal (rg) and linear view depth split into a half float and its remainder (ba).
 
 struct PreOut {
     @builtin(position) clip: vec4f,
     @location(0) vn: vec3f,
+    @location(1) depth: f32,
 }
 
 @vertex
@@ -67,14 +69,22 @@ fn vs_prepass(v: VIn) -> PreOut {
     o.clip = F.view_proj * world;
     // normal_mat's bottom row is -translation, so its w is not 0: drop it before the view transform.
     o.vn = (F.view * vec4f((O.normal_mat * vec4f(v.nrm, 0.0)).xyz, 0.0)).xyz;
+    o.depth = -(F.view * world).z;
     return o;
+}
+
+fn oct_encode(n: vec3f) -> vec2f {
+    let p = n.xy / (abs(n.x) + abs(n.y) + abs(n.z));
+    if (n.z >= 0.0) { return p; }
+    return (1.0 - abs(p.yx)) * select(vec2f(-1.0), vec2f(1.0), p >= vec2f(0.0));
 }
 
 @fragment
 fn fs_prepass(i: PreOut, @builtin(front_facing) front: bool) -> @location(0) vec4f {
     var n = normalize(i.vn);
     if (!front) { n = -n; }
-    return vec4f(n, 1.0);
+    let hi = unpack2x16float(pack2x16float(vec2f(i.depth, 0.0))).x;
+    return vec4f(oct_encode(n), hi, i.depth - hi);
 }
 
 // ---- main PBR pass ----

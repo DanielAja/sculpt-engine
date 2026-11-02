@@ -20,8 +20,7 @@ struct Frame {
 }
 
 @group(0) @binding(0) var<uniform> F: Frame;
-@group(1) @binding(0) var pre_normal: texture_2d<f32>;
-@group(1) @binding(1) var pre_depth: texture_depth_2d;
+@group(1) @binding(0) var pre: texture_2d<f32>;   // octahedral normal (rg), view depth hi + lo (ba)
 @group(1) @binding(2) var ssao_raw: texture_2d<f32>;
 @group(1) @binding(3) var hdr: texture_2d<f32>;
 
@@ -31,12 +30,23 @@ fn vs_full(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
     return vec4f(p * 2.0 - 1.0, 0.0, 1.0);
 }
 
+fn oct_decode(e: vec2f) -> vec3f {
+    var n = vec3f(e, 1.0 - abs(e.x) - abs(e.y));
+    if (n.z < 0.0) { n = vec3f((1.0 - abs(n.yx)) * select(vec2f(-1.0), vec2f(1.0), n.xy >= vec2f(0.0)), n.z); }
+    return normalize(n);
+}
+
+/// View space position of a full resolution pixel; z = 0 marks the background.
 fn view_pos(px: vec2i, full: vec2f) -> vec3f {
-    let d = textureLoad(pre_depth, px, 0);
+    let t = textureLoad(pre, px, 0);
+    let d = t.b + t.a;
+    if (d <= 0.0) { return vec3f(0.0); }
     let uv = (vec2f(px) + 0.5) / full;
-    let ndc = vec4f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, d, 1.0);
-    let v = F.inv_proj * ndc;
-    return v.xyz / v.w;
+    let ndc = vec2f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    let q = F.inv_proj * vec4f(ndc, 1.0, 1.0);
+    let p = q.xyz / q.w;
+    if (F.proj[3][3] > 0.5) { return vec3f(p.xy, -d); }   // orthographic: parallel rays
+    return p * (d / -p.z);
 }
 
 fn hash(p: vec2f) -> f32 {
@@ -47,10 +57,9 @@ fn hash(p: vec2f) -> f32 {
 fn fs_ssao(@builtin(position) frag: vec4f) -> @location(0) vec4f {
     let full = F.viewport.xy;
     let px = vec2i(frag.xy * 2.0);
-    let d = textureLoad(pre_depth, px, 0);
-    if (d >= 1.0) { return vec4f(1.0); }
     let p = view_pos(px, full);
-    let n = normalize(textureLoad(pre_normal, px, 0).xyz);
+    if (p.z >= 0.0) { return vec4f(1.0); }
+    let n = oct_decode(textureLoad(pre, px, 0).rg);
     let radius = F.params2.w;
     // Random rotation per pixel (and per frame while accumulating) around the normal.
     let ang = (hash(frag.xy) + F.jitter.w * 0.618) * 6.2831853;
@@ -74,6 +83,7 @@ fn fs_ssao(@builtin(position) frag: vec4f) -> @location(0) vec4f {
         let suv = vec2f(c.x / c.w * 0.5 + 0.5, 0.5 - c.y / c.w * 0.5);
         if (suv.x < 0.0 || suv.x > 1.0 || suv.y < 0.0 || suv.y > 1.0) { continue; }
         let sp = view_pos(vec2i(suv * full), full);
+        if (sp.z >= 0.0) { continue; }
         let range = smoothstep(0.0, 1.0, radius / max(abs(p.z - sp.z), 1e-3));
         occ += select(0.0, 1.0, sp.z >= s.z + radius * 0.05) * range;
     }

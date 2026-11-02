@@ -259,7 +259,7 @@ impl Renderer {
         let l_object = d.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("object"), entries: &[bgl_entry(0, uniform_ty(), vf)] });
         let l_ssao = d.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("ssao in"),
-            entries: &[bgl_entry(0, tex_ty(unfilt, d2), fs), bgl_entry(1, tex_ty(wgpu::TextureSampleType::Depth, d2), fs)],
+            entries: &[bgl_entry(0, tex_ty(unfilt, d2), fs)],
         });
         let l_blur = d.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("blur in"), entries: &[bgl_entry(2, tex_ty(unfilt, d2), fs)] });
         let l_tone = d.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("tone in"), entries: &[bgl_entry(3, tex_ty(unfilt, d2), fs)] });
@@ -474,7 +474,7 @@ impl Renderer {
         let hdr = tex(d, "hdr", size, HDR, 1, rt | wgpu::TextureUsages::COPY_SRC);
         let depth_msaa = tex(d, "depth msaa", size, DEPTH, MSAA, ra);
         let pre_normal = tex(d, "pre normal", size, HDR, 1, rt);
-        let pre_depth = tex(d, "pre depth", size, DEPTH, 1, rt);
+        let pre_depth = tex(d, "pre depth", size, DEPTH, 1, ra);
         let ssao_raw = tex(d, "ssao raw", half, AO, 1, rt);
         let ssao = tex(d, "ssao", half, AO, 1, rt);
         fn e(binding: u32, view: &wgpu::TextureView) -> wgpu::BindGroupEntry<'_> {
@@ -493,7 +493,7 @@ impl Renderer {
                 e(6, &ssao),
             ],
         });
-        let ssao_bind = d.create_bind_group(&wgpu::BindGroupDescriptor { label: None, layout: &self.l_ssao, entries: &[e(0, &pre_normal), e(1, &pre_depth)] });
+        let ssao_bind = d.create_bind_group(&wgpu::BindGroupDescriptor { label: None, layout: &self.l_ssao, entries: &[e(0, &pre_normal)] });
         let blur_bind = d.create_bind_group(&wgpu::BindGroupDescriptor { label: None, layout: &self.l_blur, entries: &[e(2, &ssao_raw)] });
         let tone_bind = d.create_bind_group(&wgpu::BindGroupDescriptor { label: None, layout: &self.l_tone, entries: &[e(3, &hdr)] });
         self.targets = Some(Targets { size, hdr_msaa, hdr, depth_msaa, pre_normal, pre_depth, ssao_raw, ssao, scene_bind, ssao_bind, blur_bind, tone_bind });
