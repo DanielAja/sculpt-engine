@@ -156,7 +156,8 @@ impl SculptMesh {
     }
 
     /// Refreshes normals around moved vertices (their polys, then every vertex of those polys).
-    pub fn update_normals(&mut self, moved: &[u32]) {
+    /// Returns the vertices whose normals were recomputed (sorted, a superset of `moved`).
+    pub fn update_normals(&mut self, moved: &[u32]) -> Vec<u32> {
         let mut polys: Vec<u32> = moved.iter().flat_map(|&v| self.vertex_polys.row(v as usize).iter().copied()).collect();
         polys.sort_unstable();
         polys.dedup();
@@ -167,9 +168,10 @@ impl SculptMesh {
         }
         verts.sort_unstable();
         verts.dedup();
-        for v in verts {
+        for &v in &verts {
             self.normals[v as usize] = self.vertex_normal(v as usize);
         }
+        verts
     }
 
     pub fn to_mesh(&self) -> Mesh {

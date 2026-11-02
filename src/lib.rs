@@ -3,8 +3,13 @@
 
 pub mod brush;
 pub mod bvh;
+pub mod camera;
 pub mod format;
 pub mod mesh;
+#[cfg(feature = "render")]
+pub mod render;
+#[cfg(feature = "render")]
+pub mod session;
 pub mod stroke;
 
 pub use glam;
