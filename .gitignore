@@ -3,3 +3,4 @@ target/
 *.profraw
 .DS_Store
 /web/pkg/
+/apple/SculptEngine.xcframework/

@@ -38,7 +38,9 @@ impl Gpu {
             .map_err(|e| format!("no GPU adapter: {e}"))?;
         let caps = adapter.get_downlevel_capabilities();
         let tier = if caps.flags.contains(wgpu::DownlevelFlags::COMPUTE_SHADERS) { Tier::Full } else { Tier::Downlevel };
-        let limits = if tier == Tier::Full { wgpu::Limits::default() } else { wgpu::Limits::downlevel_webgl2_defaults() };
+        // Ask for the modest downlevel limits (the iOS simulator's Metal device, for one, is below wgpu's
+        // defaults: 15 inter-stage variables); the shaders stay well inside them.
+        let limits = if tier == Tier::Full { wgpu::Limits::downlevel_defaults() } else { wgpu::Limits::downlevel_webgl2_defaults() };
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor { label: Some("sculpt-engine"), required_limits: limits.using_resolution(adapter.limits()), ..Default::default() })
             .await
@@ -568,6 +570,11 @@ impl Renderer {
             self.gpu.queue.write_buffer(&o.vbuf, 0, bytemuck::cast_slice(&v));
         }
         o.bounds = world_bounds(&mesh.positions, o.world);
+        self.shadow_dirty = true;
+    }
+
+    pub fn remove(&mut self, id: &str) {
+        self.objects.retain(|o| o.id != id);
         self.shadow_dirty = true;
     }
 

@@ -13,5 +13,9 @@ pub mod session;
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 pub mod web;
 pub mod stroke;
+#[cfg(feature = "ffi")]
+pub mod ffi;
+#[cfg(feature = "ffi")]
+uniffi::setup_scaffolding!();
 
 pub use glam;

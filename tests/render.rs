@@ -106,3 +106,25 @@ fn session_sculpt_undo_and_save() {
     assert!(s.redo());
     assert_eq!(s.project_json().unwrap(), moved.encode());
 }
+
+/// Hosts that own the scene push objects in, pick them and project points; bad input is refused.
+#[test]
+fn session_host_objects() {
+    use sculpt_engine::session::{object_from_parts, Session};
+    let Some(r) = renderer() else { return };
+    let mut s = Session::new(r, (800, 600));
+    let world: Vec<f32> = Mat4::from_translation(Vec3::new(0.0, 0.0, 10.0)).to_cols_array().to_vec();
+    let cube = r#"{"positions":[-10,-10,-10,10,-10,-10,10,10,-10,-10,10,-10,-10,-10,10,10,-10,10,10,10,10,-10,10,10],
+      "faces":[[0,3,2,1],[4,5,6,7],[0,1,5,4],[1,2,6,5],[2,3,7,6],[3,0,4,7]],"smoothShading":false}"#;
+    s.upsert_object(object_from_parts("A", cube, &world, &[0.2, 0.6, 0.6, 1.0], 0.0, 0.5).unwrap());
+    s.camera = OrbitCamera { target: [0.0, 0.0, 10.0], distance: 80.0, yaw_degrees: 0.0, pitch_degrees: 0.0, ..OrbitCamera::default() };
+    let (id, p) = s.pick(400.0, 300.0).unwrap();
+    assert_eq!(id, "A");
+    assert!((p - Vec3::new(0.0, -10.0, 10.0)).length() < 1e-3, "{p}");
+    let (x, y, _) = s.project(Vec3::new(0.0, 0.0, 10.0)).unwrap();
+    assert!((x - 400.0).abs() < 0.01 && (y - 300.0).abs() < 0.01);
+    s.remove_object("A");
+    assert!(s.pick(400.0, 300.0).is_none());
+    assert!(object_from_parts("B", r#"{"positions":[0,0,0],"faces":[[0,1,2]]}"#, &world, &[1.0; 4], 0.0, 0.5).is_err());
+    assert!(object_from_parts("B", cube, &[0.0; 15], &[1.0; 4], 0.0, 0.5).is_err());
+}
