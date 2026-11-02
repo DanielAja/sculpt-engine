@@ -103,8 +103,8 @@ impl SculptTarget {
         }
         vs.sort_unstable();
         vs.dedup();
-        self.mesh.update_normals(&vs);
-        self.dirty.extend_from_slice(&vs);
+        let changed = self.mesh.update_normals(&vs);
+        self.dirty.extend_from_slice(&changed);
         // Keep queries exact without a refit; refit once vertices have drifted a quarter radius.
         self.bvh.slack += moved_by;
         if self.bvh.slack > lp.radius * 0.25 {
@@ -131,8 +131,8 @@ impl SculptTarget {
         for (v, p) in st.before {
             self.mesh.positions[v as usize] = p;
         }
-        self.mesh.update_normals(&vs);
-        self.dirty.extend_from_slice(&vs);
+        let changed = self.mesh.update_normals(&vs);
+        self.dirty.extend_from_slice(&changed);
         self.bvh.refit(&self.mesh.positions, &self.mesh.tris);
     }
 
@@ -144,7 +144,7 @@ impl SculptTarget {
         self.dirty.clear();
     }
 
-    /// Vertices changed since the last call, sorted and unique.
+    /// Vertices whose position or normal changed since the last call, sorted and unique.
     pub fn take_dirty(&mut self) -> Vec<u32> {
         let mut d = std::mem::take(&mut self.dirty);
         d.sort_unstable();
