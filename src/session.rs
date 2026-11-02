@@ -13,6 +13,35 @@ use glam::{Mat4, Vec3};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// Builds an `Object` from the flat data hosts pass across the bindings (validated: this is a trust boundary).
+/// `world` is a column major 4x4; `color` is sRGB r, g, b, a.
+pub fn object_from_parts(id: &str, mesh_json: &str, world: &[f32], color: &[f32], metallic: f32, roughness: f32) -> Result<Object, String> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct MeshIn {
+        positions: Vec<f32>,
+        faces: Vec<Vec<u32>>,
+        #[serde(default)]
+        smooth_shading: bool,
+    }
+    let m: MeshIn = serde_json::from_str(mesh_json).map_err(|e| e.to_string())?;
+    let n = (m.positions.len() / 3) as u32;
+    if m.positions.len() % 3 != 0 || m.faces.iter().any(|f| f.len() < 3 || f.iter().any(|&i| i >= n)) {
+        return Err("invalid mesh: positions must be x, y, z triples and faces valid indices".into());
+    }
+    if world.len() != 16 || !world.iter().all(|x| x.is_finite()) || color.len() != 4 {
+        return Err("world must be 16 finite floats and color 4 floats".into());
+    }
+    let mesh = Mesh { positions: m.positions.chunks_exact(3).map(|c| Vec3::new(c[0], c[1], c[2])).collect(), faces: m.faces, smooth_shading: m.smooth_shading };
+    let c = |i: usize| color[i].clamp(0.0, 1.0);
+    Ok(Object {
+        id: id.to_string(),
+        mesh: Arc::new(mesh),
+        world: Mat4::from_cols_slice(world),
+        material: Material { name: String::new(), base_color: crate::format::Color { r: c(0), g: c(1), b: c(2), a: c(3) }, metallic: metallic.clamp(0.0, 1.0), roughness: roughness.clamp(0.0, 1.0) },
+    })
+}
+
 pub struct Object {
     pub id: String,
     pub mesh: Arc<Mesh>,
@@ -99,6 +128,39 @@ impl Session {
 
     fn upload(&mut self, o: &Object) {
         self.renderer.upsert(&o.id, &SculptMesh::from_mesh(&o.mesh), o.world, &o.material);
+    }
+
+    /// Adds or replaces one object from the host's scene (hosts that own the scene through the Swift core).
+    /// `mesh` is the object's base mesh (n-gon faces), so a stroke's `setMesh` keeps its faces.
+    pub fn upsert_object(&mut self, o: Object) {
+        if self.sculpting.as_deref() == Some(o.id.as_str()) {
+            self.sculpting = None;
+        }
+        self.targets.remove(&o.id);
+        self.upload(&o);
+        match self.objects.iter().position(|x| x.id == o.id) {
+            Some(i) => self.objects[i] = o,
+            None => self.objects.push(o),
+        }
+    }
+
+    pub fn remove_object(&mut self, id: &str) {
+        self.objects.retain(|o| o.id != id);
+        self.targets.remove(id);
+        if self.sculpting.as_deref() == Some(id) {
+            self.sculpting = None;
+        }
+        self.renderer.remove(id);
+    }
+
+    /// Screen position (pixels, top left origin) and clip depth of a world point; None behind the camera.
+    pub fn project(&self, p: Vec3) -> Option<(f32, f32, f32)> {
+        let c = self.camera.view_projection(self.aspect()) * p.extend(1.0);
+        if c.w <= 0.0 {
+            return None;
+        }
+        let n = c.truncate() / c.w;
+        Some(((n.x + 1.0) * 0.5 * self.size.0 as f32, (1.0 - n.y) * 0.5 * self.size.1 as f32, n.z))
     }
 
     pub fn frame_all(&mut self) {

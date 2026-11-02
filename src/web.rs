@@ -168,6 +168,35 @@ impl WebEngine {
         Ok(())
     }
 
+    /// Adds or replaces an object from the host's scene: base mesh JSON (Sculptor's Mesh shape), column
+    /// major world matrix (16 floats, mm, Z up), sRGB colour (4 floats), metallic, roughness.
+    #[wasm_bindgen(js_name = upsertObject)]
+    pub fn upsert_object(&mut self, id: &str, mesh_json: &str, world: &[f32], color: &[f32], metallic: f32, roughness: f32) -> Result<(), JsValue> {
+        let o = crate::session::object_from_parts(id, mesh_json, world, color, metallic, roughness).map_err(err)?;
+        self.session.upsert_object(o);
+        Ok(())
+    }
+    #[wasm_bindgen(js_name = removeObject)]
+    pub fn remove_object(&mut self, id: &str) {
+        self.session.remove_object(id)
+    }
+    #[wasm_bindgen(js_name = setHighlight)]
+    pub fn set_highlight(&mut self, id: &str, on: bool) {
+        self.session.renderer.set_highlight(id, on)
+    }
+    #[wasm_bindgen(js_name = frameAll)]
+    pub fn frame_all(&mut self) {
+        self.session.frame_all()
+    }
+    /// `{"id": ..., "point": [x, y, z]}` for the surface under a point, or undefined.
+    pub fn hit(&mut self, x: f32, y: f32) -> Option<String> {
+        self.session.pick(x, y).map(|(id, p)| serde_json::json!({ "id": id, "point": [p.x, p.y, p.z] }).to_string())
+    }
+    /// Canvas x, y (pixels) and clip depth of a world point; empty when behind the camera.
+    pub fn project(&self, x: f32, y: f32, z: f32) -> Vec<f32> {
+        self.session.project(Vec3::new(x, y, z)).map(|(a, b, c)| vec![a, b, c]).unwrap_or_default()
+    }
+
     /// "agx", "aces" or "linear"; SSAO and shadows on or off.
     #[wasm_bindgen(js_name = setLook)]
     pub fn set_look(&mut self, tonemap: &str, ssao: bool, shadows: bool) {

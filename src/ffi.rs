@@ -195,6 +195,31 @@ impl EngineView {
         s.shadows = shadows;
     }
 
+    /// Adds or replaces an object from the host's scene: base mesh JSON (Sculptor's Mesh shape), column
+    /// major world matrix (16 floats, millimetres, Z up), sRGB colour (4 floats), metallic, roughness.
+    pub fn upsert_object(&self, id: String, mesh_json: String, world: Vec<f32>, color: Vec<f32>, metallic: f32, roughness: f32) -> Result<(), EngineError> {
+        let o = crate::session::object_from_parts(&id, &mesh_json, &world, &color, metallic, roughness).map_err(EngineError::Invalid)?;
+        self.inner.lock().unwrap().session.upsert_object(o);
+        Ok(())
+    }
+    pub fn remove_object(&self, id: String) {
+        self.inner.lock().unwrap().session.remove_object(&id)
+    }
+    pub fn set_highlight(&self, id: String, on: bool) {
+        self.inner.lock().unwrap().session.renderer.set_highlight(&id, on)
+    }
+    pub fn frame_all(&self) {
+        self.inner.lock().unwrap().session.frame_all()
+    }
+    /// The object and world point under a screen point (pixels).
+    pub fn hit(&self, x: f32, y: f32) -> Option<Hit> {
+        self.inner.lock().unwrap().session.pick(x, y).map(|(id, p)| Hit { id, x: p.x, y: p.y, z: p.z })
+    }
+    /// Screen x, y (pixels) and clip depth of a world point; empty when behind the camera.
+    pub fn project(&self, x: f32, y: f32, z: f32) -> Vec<f32> {
+        self.inner.lock().unwrap().session.project(Vec3::new(x, y, z)).map(|(a, b, c)| vec![a, b, c]).unwrap_or_default()
+    }
+
     /// Renders the current scene offscreen to PNG bytes (any view, surface or not).
     pub fn snapshot_png(&self, width: u32, height: u32) -> Vec<u8> {
         let mut i = self.inner.lock().unwrap();
@@ -217,6 +242,14 @@ fn png(px: &[u8], size: (u32, u32)) -> Vec<u8> {
     e.set_depth(::png::BitDepth::Eight);
     e.write_header().and_then(|mut w| w.write_image_data(px)).expect("png");
     out
+}
+
+#[derive(uniffi::Record)]
+pub struct Hit {
+    pub id: String,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
 }
 
 /// One object for Dream Builder's `SnapshotRenderer`: triangle buffers in engine space (mm, Z up),
