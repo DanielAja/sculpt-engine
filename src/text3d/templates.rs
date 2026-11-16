@@ -435,7 +435,7 @@ pub fn build(name: &str, r: &mut Rng) -> Option<(Parts, f32)> {
         }
         "crown" => (vec![
             metal("Crown", GOLD, union(0.0, {
-                let mut v = vec![cylinder(32.0, 22.0).hollow(3.0).at(0.0, 0.0, 11.0)];
+                let mut v = vec![difference(0.0, vec![cylinder(32.0, 22.0).at(0.0, 0.0, 11.0), cylinder(28.5, 30.0).at(0.0, 0.0, 14.0)])];
                 v.extend(ring_of(8, 30.5, 26.0, |_| cone(5.0, 0.0, 18.0)));
                 v
             })),
