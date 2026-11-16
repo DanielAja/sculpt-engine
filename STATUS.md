@@ -14,6 +14,7 @@ Remote: github.com/DanielAja/sculpt-engine (private). `main` and each milestone 
 | E4 Apple | Done, merged. `ffi` feature (uniffi 0.32): `EngineView` (Metal layer, Android window or offscreen) plus `renderSnapshot` for Dream Builder. `apple/build-xcframework.sh` gives `SculptEngine.xcframework` (iOS, iOS sim, macOS, visionOS, visionOS sim; arm64) and the SwiftPM package `apple/SculptEngine`. iPad SwiftUI sample runs on the simulator; visionOS offscreen snapshot verified in the visionOS simulator. |
 | E4.5 host scene | Next: the web port's top gaps (below). |
 | E5 to E7, E1b | Not started. |
+| **Text to 3D** | **Done on branch `text-to-3d`** (2026-11-16). `src/text3d`: shape programs (SDF/CSG JSON), built-in planner, LLM prompt and schema, and Surface Nets with manifold output. wasm and uniffi bindings (the Swift bindings in `apple/SculptEngine` are regenerated; the xcframework itself was not rebuilt). sculptor.web "Make it" uses it. 14 new unit tests (34 in the crate): every template is manifold at the default detail and at Dream Builder's 8,000-triangle budget. wasm 2.47 MB raw, 0.77 MB brotli. See `docs/text-to-3d.md`. |
 
 ### E1 benchmarks (M-class Mac, shared machine, load 15 to 28, `cargo bench --bench core`)
 

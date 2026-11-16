@@ -289,6 +289,29 @@ pub fn render_snapshot(objects: Vec<SnapshotObject>, camera_json: String, width:
     Ok(png(&r.render_rgba((width.max(1), height.max(1)), &cam), (width.max(1), height.max(1))))
 }
 
+/// Text to 3D (src/text3d): plans and meshes `prompt`. JSON in and out, see `text3d::host::generate_json`.
+#[uniffi::export]
+pub fn text_to_3d(prompt: String, options_json: String) -> String {
+    crate::text3d::host::generate_json(&prompt, &options_json)
+}
+
+/// Meshes a shape program, or an LLM reply containing one (Apple Foundation Models, a local model).
+#[uniffi::export]
+pub fn mesh_program(program_or_reply: String, options_json: String) -> String {
+    crate::text3d::host::mesh_program_json(&program_or_reply, &options_json)
+}
+
+/// The system prompt and JSON Schema for asking an LLM for a shape program.
+#[uniffi::export]
+pub fn program_prompt() -> String {
+    crate::text3d::host::llm_system_prompt()
+}
+
+#[uniffi::export]
+pub fn program_schema() -> String {
+    crate::text3d::host::program_schema()
+}
+
 /// JNI entry for the Android sample: `ANativeWindow_fromSurface` (the caller releases it with the view).
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
