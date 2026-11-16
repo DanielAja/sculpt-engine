@@ -229,3 +229,36 @@ fn console_error_panic_hook_set() {
         }))
     });
 }
+
+// Text to 3D (src/text3d). Free functions: they need no GPU, so hosts can run them in a worker.
+
+/// Plans and meshes `prompt`. `options` is JSON: `{maxTriangles, detail, seed, quads}` (all optional).
+/// Returns `{ok, understood, notes, triangles, program, parts:[{name, pivot, material, triangles, mesh}]}`.
+#[wasm_bindgen(js_name = textTo3d)]
+pub fn text_to_3d(prompt: &str, options: &str) -> String {
+    crate::text3d::host::generate_json(prompt, options)
+}
+
+/// Plans without meshing: `{ok, understood, notes, program}`.
+#[wasm_bindgen(js_name = planText)]
+pub fn plan_text(prompt: &str, seed: u32) -> String {
+    crate::text3d::host::plan_json(prompt, seed)
+}
+
+/// Meshes a shape program, or an LLM reply that contains one.
+#[wasm_bindgen(js_name = meshProgram)]
+pub fn mesh_program(program_or_reply: &str, options: &str) -> String {
+    crate::text3d::host::mesh_program_json(program_or_reply, options)
+}
+
+/// The system prompt that makes an LLM answer with a shape program.
+#[wasm_bindgen(js_name = programPrompt)]
+pub fn program_prompt() -> String {
+    crate::text3d::host::llm_system_prompt()
+}
+
+/// JSON Schema of a shape program, for constrained decoding.
+#[wasm_bindgen(js_name = programSchema)]
+pub fn program_schema() -> String {
+    crate::text3d::host::program_schema()
+}

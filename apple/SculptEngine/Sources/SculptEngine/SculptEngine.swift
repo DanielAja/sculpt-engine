@@ -1472,6 +1472,35 @@ fileprivate struct FfiConverterSequenceTypeSnapshotObject: FfiConverterRustBuffe
     }
 }
 /**
+ * Meshes a shape program, or an LLM reply containing one (Apple Foundation Models, a local model).
+ */
+public func meshProgram(programOrReply: String, optionsJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_func_mesh_program(
+        FfiConverterString.lower(programOrReply),
+        FfiConverterString.lower(optionsJson),uniffiCallStatus
+    )
+})
+}
+/**
+ * The system prompt and JSON Schema for asking an LLM for a shape program.
+ */
+public func programPrompt() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_func_program_prompt(uniffiCallStatus
+    )
+})
+}
+public func programSchema() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_func_program_schema(uniffiCallStatus
+    )
+})
+}
+/**
  * A realistic still of loose triangle buffers, no project needed (Dream Builder, thumbnails).
  */
 public func renderSnapshot(objects: [SnapshotObject], cameraJson: String, width: UInt32, height: UInt32)throws  -> Data  {
@@ -1482,6 +1511,18 @@ public func renderSnapshot(objects: [SnapshotObject], cameraJson: String, width:
         FfiConverterString.lower(cameraJson),
         FfiConverterUInt32.lower(width),
         FfiConverterUInt32.lower(height),uniffiCallStatus
+    )
+})
+}
+/**
+ * Text to 3D (src/text3d): plans and meshes `prompt`. JSON in and out, see `text3d::host::generate_json`.
+ */
+public func textTo3d(prompt: String, optionsJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_func_text_to_3d(
+        FfiConverterString.lower(prompt),
+        FfiConverterString.lower(optionsJson),uniffiCallStatus
     )
 })
 }
@@ -1501,7 +1542,19 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
+    if (uniffi_sculpt_engine_checksum_func_mesh_program() != 47970) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_func_program_prompt() != 41239) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_func_program_schema() != 37205) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_sculpt_engine_checksum_func_render_snapshot() != 39699) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_func_text_to_3d() != 32481) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sculpt_engine_checksum_method_engineview_backend() != 44879) {
