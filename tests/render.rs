@@ -123,6 +123,13 @@ fn session_host_objects() {
     assert!((p - Vec3::new(0.0, -10.0, 10.0)).length() < 1e-3, "{p}");
     let (x, y, _) = s.project(Vec3::new(0.0, 0.0, 10.0)).unwrap();
     assert!((x - 400.0).abs() < 0.01 && (y - 300.0).abs() < 0.01);
+    assert!(s.set_transform("A", Mat4::from_translation(Vec3::new(25.0, 0.0, 10.0))));
+    assert!(s.pick(400.0, 300.0).is_none());
+    assert!(s.set_transform("A", Mat4::from_translation(Vec3::new(0.0, 0.0, 10.0))));
+    assert_eq!(s.pick(400.0, 300.0).map(|h| h.0), Some("A".to_string()));
+    assert!(s.set_material("A", mat("Copper", 0xD97742, 0.9, 0.25)));
+    assert!(s.set_visible("A", false));
+    assert!(s.set_visible("A", true));
     s.remove_object("A");
     assert!(s.pick(400.0, 300.0).is_none());
     assert!(object_from_parts("B", r#"{"positions":[0,0,0],"faces":[[0,1,2]]}"#, &world, &[1.0; 4], 0.0, 0.5).is_err());

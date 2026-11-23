@@ -180,6 +180,33 @@ impl WebEngine {
     pub fn remove_object(&mut self, id: &str) {
         self.session.remove_object(id)
     }
+    #[wasm_bindgen(js_name = setTransform)]
+    pub fn set_transform(&mut self, id: &str, world: &[f32]) -> Result<(), JsValue> {
+        if world.len() != 16 || !world.iter().all(|x| x.is_finite()) {
+            return Err(err("world must be 16 finite floats"));
+        }
+        self.session.set_transform(id, Mat4::from_cols_slice(world));
+        Ok(())
+    }
+    #[wasm_bindgen(js_name = setMaterial)]
+    pub fn set_material(&mut self, id: &str, color: &[f32], metallic: f32, roughness: f32) -> Result<(), JsValue> {
+        if color.len() != 4 || !color.iter().all(|x| x.is_finite()) || !metallic.is_finite() || !roughness.is_finite() {
+            return Err(err("color must be 4 finite floats"));
+        }
+        let c = |i: usize| color[i].clamp(0.0, 1.0);
+        let m = Material {
+            name: String::new(),
+            base_color: crate::format::Color { r: c(0), g: c(1), b: c(2), a: c(3) },
+            metallic: metallic.clamp(0.0, 1.0),
+            roughness: roughness.clamp(0.0, 1.0),
+        };
+        self.session.set_material(id, m);
+        Ok(())
+    }
+    #[wasm_bindgen(js_name = setVisible)]
+    pub fn set_visible(&mut self, id: &str, visible: bool) {
+        self.session.set_visible(id, visible);
+    }
     #[wasm_bindgen(js_name = setHighlight)]
     pub fn set_highlight(&mut self, id: &str, on: bool) {
         self.session.renderer.set_highlight(id, on)

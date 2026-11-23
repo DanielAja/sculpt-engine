@@ -136,6 +136,14 @@ impl SculptTarget {
         self.bvh.refit(&self.mesh.positions, &self.mesh.tris);
     }
 
+    /// Updates the object's world transform without rebuilding the mesh or BVH.
+    pub fn set_world(&mut self, world: Mat4) {
+        let (s, _, _) = world.to_scale_rotation_translation();
+        self.world = world;
+        self.world_inverse = world.inverse();
+        self.scale = ((s.x.abs() + s.y.abs() + s.z.abs()) / 3.0).max(1e-6);
+    }
+
     /// Replaces the mesh (undo, redo, or an edit from the host); rebuilds the BVH.
     pub fn set_mesh(&mut self, mesh: &Mesh) {
         self.stroke = None;

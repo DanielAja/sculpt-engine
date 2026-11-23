@@ -668,6 +668,12 @@ public protocol EngineViewProtocol: AnyObject, Sendable {
      */
     func setLook(tonemap: String, ssao: Bool, shadows: Bool) 
     
+    func setMaterial(id: String, color: [Float], metallic: Float, roughness: Float) throws 
+    
+    func setTransform(id: String, world: [Float]) throws 
+    
+    func setVisible(id: String, visible: Bool) 
+    
     /**
      * Renders the current scene offscreen to PNG bytes (any view, surface or not).
      */
@@ -1011,6 +1017,38 @@ open func setLook(tonemap: String, ssao: Bool, shadows: Bool)  {try! rustCall() 
         FfiConverterString.lower(tonemap),
         FfiConverterBool.lower(ssao),
         FfiConverterBool.lower(shadows),uniffiCallStatus
+    )
+}
+}
+    
+open func setMaterial(id: String, color: [Float], metallic: Float, roughness: Float)throws   {try rustCallWithError(FfiConverterTypeEngineError_lift) {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_method_engineview_set_material(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),
+        FfiConverterSequenceFloat.lower(color),
+        FfiConverterFloat.lower(metallic),
+        FfiConverterFloat.lower(roughness),uniffiCallStatus
+    )
+}
+}
+    
+open func setTransform(id: String, world: [Float])throws   {try rustCallWithError(FfiConverterTypeEngineError_lift) {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_method_engineview_set_transform(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),
+        FfiConverterSequenceFloat.lower(world),uniffiCallStatus
+    )
+}
+}
+    
+open func setVisible(id: String, visible: Bool)  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_method_engineview_set_visible(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),
+        FfiConverterBool.lower(visible),uniffiCallStatus
     )
 }
 }
@@ -1621,6 +1659,15 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sculpt_engine_checksum_method_engineview_set_look() != 47607) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_method_engineview_set_material() != 6023) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_method_engineview_set_transform() != 47374) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_method_engineview_set_visible() != 26918) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sculpt_engine_checksum_method_engineview_snapshot_png() != 37746) {

@@ -205,6 +205,30 @@ impl EngineView {
     pub fn remove_object(&self, id: String) {
         self.inner.lock().unwrap().session.remove_object(&id)
     }
+    pub fn set_transform(&self, id: String, world: Vec<f32>) -> Result<(), EngineError> {
+        if world.len() != 16 || !world.iter().all(|x| x.is_finite()) {
+            return Err(EngineError::Invalid("world must be 16 finite floats".into()));
+        }
+        self.inner.lock().unwrap().session.set_transform(&id, Mat4::from_cols_slice(&world));
+        Ok(())
+    }
+    pub fn set_material(&self, id: String, color: Vec<f32>, metallic: f32, roughness: f32) -> Result<(), EngineError> {
+        if color.len() != 4 || !color.iter().all(|x| x.is_finite()) || !metallic.is_finite() || !roughness.is_finite() {
+            return Err(EngineError::Invalid("color must be 4 finite floats".into()));
+        }
+        let c = |i: usize| color[i].clamp(0.0, 1.0);
+        let m = Material {
+            name: String::new(),
+            base_color: Color { r: c(0), g: c(1), b: c(2), a: c(3) },
+            metallic: metallic.clamp(0.0, 1.0),
+            roughness: roughness.clamp(0.0, 1.0),
+        };
+        self.inner.lock().unwrap().session.set_material(&id, m);
+        Ok(())
+    }
+    pub fn set_visible(&self, id: String, visible: bool) {
+        self.inner.lock().unwrap().session.set_visible(&id, visible);
+    }
     pub fn set_highlight(&self, id: String, on: bool) {
         self.inner.lock().unwrap().session.renderer.set_highlight(&id, on)
     }
@@ -265,16 +289,25 @@ pub struct SnapshotObject {
     pub roughness: f32,
 }
 
+static SNAPSHOT_RENDERER: Mutex<Option<Renderer>> = Mutex::new(None);
+
 /// A realistic still of loose triangle buffers, no project needed (Dream Builder, thumbnails).
 #[uniffi::export]
 pub fn render_snapshot(objects: Vec<SnapshotObject>, camera_json: String, width: u32, height: u32) -> Result<Vec<u8>, EngineError> {
     let cam: OrbitCamera = serde_json::from_str(&camera_json).map_err(|e| EngineError::Invalid(e.to_string()))?;
-    let gpu = pollster::block_on(Gpu::headless()).map_err(EngineError::Gpu)?;
-    let mut r = Renderer::new(gpu, wgpu::TextureFormat::Rgba8UnormSrgb);
-    r.settings.grid = false;
+    let mut guard = SNAPSHOT_RENDERER.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.is_none() {
+        let gpu = pollster::block_on(Gpu::headless()).map_err(EngineError::Gpu)?;
+        let mut r = Renderer::new(gpu, wgpu::TextureFormat::Rgba8UnormSrgb);
+        r.settings.grid = false;
+        *guard = Some(r);
+    }
+    let r = guard.as_mut().unwrap();
+    r.clear();
     for (k, o) in objects.iter().enumerate() {
         let n = (o.positions.len() / 3) as u32;
         if o.positions.len() % 3 != 0 || o.indices.len() % 3 != 0 || o.indices.iter().any(|&i| i >= n) || o.world.len() != 16 || o.base_color.len() != 4 {
+            r.clear();
             return Err(EngineError::Invalid(format!("object {k}: bad buffers")));
         }
         let mesh = Mesh {
@@ -286,7 +319,9 @@ pub fn render_snapshot(objects: Vec<SnapshotObject>, camera_json: String, width:
         let m = Material { name: String::new(), base_color: Color { r: c[0], g: c[1], b: c[2], a: c[3] }, metallic: o.metallic, roughness: o.roughness };
         r.upsert(&k.to_string(), &SculptMesh::from_mesh(&mesh), Mat4::from_cols_slice(&o.world), &m);
     }
-    Ok(png(&r.render_rgba((width.max(1), height.max(1)), &cam), (width.max(1), height.max(1))))
+    let bytes = png(&r.render_rgba((width.max(1), height.max(1)), &cam), (width.max(1), height.max(1)));
+    r.clear();
+    Ok(bytes)
 }
 
 /// Text to 3D (src/text3d): plans and meshes `prompt`. JSON in and out, see `text3d::host::generate_json`.

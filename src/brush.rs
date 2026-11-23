@@ -69,34 +69,39 @@ pub fn dab(m: &mut SculptMesh, bvh: &Bvh, s: &mut Scratch, center: Vec3, p: &Bru
     if !(r > 0.0) || m.positions.is_empty() {
         return 0.0;
     }
-    let mut centers = vec![center];
+    let mut centers = [Vec3::ZERO; 8];
+    centers[0] = center;
+    let mut n_centers = 1usize;
+    let min_dist2 = (r * 0.01) * (r * 0.01);
     for axis in 0..3 {
         if p.symmetry[axis] {
-            for i in 0..centers.len() {
+            for i in 0..n_centers {
                 let c = centers[i];
                 let mut mirrored = c;
                 mirrored[axis] = -mirrored[axis];
-                if (mirrored - c).length() > r * 0.01 {
-                    centers.push(mirrored);
+                if (mirrored - c).length_squared() > min_dist2 {
+                    centers[n_centers] = mirrored;
+                    n_centers += 1;
                 }
             }
         }
     }
     s.stamp.resize(m.positions.len());
     let st = p.strength.clamp(-1.0, 1.0);
-    let mut max_move: f32 = 0.0;
-    for c in centers {
+    let inv_r2 = 1.0 / (r * r);
+    let mut max_move_sq: f32 = 0.0;
+    for &c in &centers[..n_centers] {
         // shortcut: vertices used by no face are never brushed (the web port moves them too); harmless for real meshes.
         bvh.sphere_vertices(&m.positions, &m.tris, c, r, &mut s.stamp, &mut s.hits);
         if s.hits.is_empty() {
             continue;
         }
         s.weights.clear();
+        s.weights.reserve(s.hits.len());
         let (mut avg_n, mut avg_p, mut wsum) = (Vec3::ZERO, Vec3::ZERO, 0f32);
         for &v in &s.hits {
             let q = m.positions[v as usize];
-            let d = (q - c).length();
-            let t = 1.0 - (d / r) * (d / r);
+            let t = 1.0 - (q - c).length_squared() * inv_r2;
             let f = t * t;
             s.weights.push(f);
             avg_n += m.normals[v as usize] * f;
@@ -106,45 +111,52 @@ pub fn dab(m: &mut SculptMesh, bvh: &Bvh, s: &mut Scratch, center: Vec3, p: &Bru
         if !(wsum > 0.0) {
             continue;
         }
-        let n = if avg_n.length() > 1e-6 { avg_n.normalize() } else { Vec3::Z };
+        let avg_n_len2 = avg_n.length_squared();
+        let n = if avg_n_len2 > 1e-12 { avg_n / avg_n_len2.sqrt() } else { Vec3::Z };
         let plane = avg_p / wsum;
-        let (pos, nrm, nb) = (&m.positions, &m.normals, &m.neighbours);
-        let step = |i: usize| -> Vec3 {
-            let v = s.hits[i] as usize;
-            let f = s.weights[i];
-            let src = pos[v];
-            match p.kind {
-                BrushKind::Inflate => src + nrm[v] * (st * f * r * 0.1),
-                BrushKind::Smooth => {
-                    let row = nb.row(v);
-                    if row.is_empty() {
-                        return src;
-                    }
-                    let mut avg = Vec3::ZERO;
-                    for &j in row {
-                        avg += pos[j as usize];
-                    }
-                    avg /= row.len() as f32;
-                    src + (avg - src) * (st.abs() * f)
-                }
-                BrushKind::Flatten => src - n * ((src - plane).dot(n) * st.abs() * f),
-                BrushKind::Draw => src + n * (st * f * r * 0.1),
-            }
-        };
+        let (pos, nrm, nb, hits, weights) = (&m.positions, &m.normals, &m.neighbours, &s.hits, &s.weights);
+        let kind = p.kind;
         s.new_pos.clear();
-        par_map(s.hits.len(), &step, &mut s.new_pos);
+        par_map(
+            hits.len(),
+            |i| {
+                let v = hits[i] as usize;
+                let f = weights[i];
+                let src = pos[v];
+                match kind {
+                    BrushKind::Inflate => src + nrm[v] * (st * f * r * 0.1),
+                    BrushKind::Smooth => {
+                        let row = nb.row(v);
+                        if row.is_empty() {
+                            return src;
+                        }
+                        let mut avg = Vec3::ZERO;
+                        for &j in row {
+                            avg += pos[j as usize];
+                        }
+                        avg /= row.len() as f32;
+                        src + (avg - src) * (st.abs() * f)
+                    }
+                    BrushKind::Flatten => src - n * ((src - plane).dot(n) * st.abs() * f),
+                    BrushKind::Draw => src + n * (st * f * r * 0.1),
+                }
+            },
+            &mut s.new_pos,
+        );
+        moved.reserve(s.hits.len());
         for (i, &v) in s.hits.iter().enumerate() {
             let old = m.positions[v as usize];
-            max_move = max_move.max((s.new_pos[i] - old).length());
-            m.positions[v as usize] = s.new_pos[i];
+            let np = s.new_pos[i];
+            max_move_sq = max_move_sq.max((np - old).length_squared());
+            m.positions[v as usize] = np;
             moved.push((v, old));
         }
     }
-    max_move
+    max_move_sq.sqrt()
 }
 
 #[cfg(feature = "threads")]
-fn par_map(n: usize, f: &(dyn Fn(usize) -> Vec3 + Sync), out: &mut Vec<Vec3>) {
+fn par_map<F: Fn(usize) -> Vec3 + Sync + Send>(n: usize, f: F, out: &mut Vec<Vec3>) {
     use rayon::prelude::*;
     if n >= PARALLEL_MIN {
         (0..n).into_par_iter().with_min_len(1024).map(f).collect_into_vec(out);
@@ -154,7 +166,7 @@ fn par_map(n: usize, f: &(dyn Fn(usize) -> Vec3 + Sync), out: &mut Vec<Vec3>) {
 }
 
 #[cfg(not(feature = "threads"))]
-fn par_map(n: usize, f: &(dyn Fn(usize) -> Vec3 + Sync), out: &mut Vec<Vec3>) {
+fn par_map<F: Fn(usize) -> Vec3 + Sync + Send>(n: usize, f: F, out: &mut Vec<Vec3>) {
     let _ = PARALLEL_MIN;
     out.extend((0..n).map(f));
 }

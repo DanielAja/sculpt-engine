@@ -53,9 +53,9 @@ pub struct SculptMesh {
 impl SculptMesh {
     pub fn from_mesh(m: &Mesh) -> SculptMesh {
         let n = m.positions.len();
-        let faces: Vec<&Vec<u32>> = m.faces.iter().filter(|f| f.len() >= 3).collect();
-        let polys = Csr::from_rows(faces.len(), |push| {
-            for (fi, f) in faces.iter().enumerate() {
+        let fc = m.faces.iter().filter(|f| f.len() >= 3).count();
+        let polys = Csr::from_rows(fc, |push| {
+            for (fi, f) in m.faces.iter().filter(|f| f.len() >= 3).enumerate() {
                 for &v in f.iter() {
                     push(fi, v);
                 }
@@ -84,6 +84,7 @@ impl SculptMesh {
         let n = self.positions.len();
         let pc = self.poly_count();
         self.tris.clear();
+        self.tris.reserve(self.polys.items.len().saturating_sub(2 * pc));
         for p in 0..pc {
             let r = self.polys.row(p);
             for k in 1..r.len() - 1 {
@@ -101,10 +102,11 @@ impl SculptMesh {
         let mut nb = Csr::from_rows(n, |push| {
             for p in 0..pc {
                 let r = polys.row(p);
-                for k in 0..r.len() {
-                    let (a, b) = (r[k], r[(k + 1) % r.len()]);
-                    push(a as usize, b);
-                    push(b as usize, a);
+                let mut prev = r[r.len() - 1];
+                for &cur in r {
+                    push(prev as usize, cur);
+                    push(cur as usize, prev);
+                    prev = cur;
                 }
             }
         });
@@ -134,15 +136,17 @@ impl SculptMesh {
     }
 
     /// Newell's method, written exactly as Sculptor's `Mesh.newellVector`.
+    #[inline]
     fn newell(&self, p: usize) -> Vec3 {
         let r = self.polys.row(p);
         let mut n = Vec3::ZERO;
-        for i in 0..r.len() {
-            let a = self.positions[r[i] as usize];
-            let b = self.positions[r[(i + 1) % r.len()] as usize];
+        let mut a = self.positions[r[r.len() - 1] as usize];
+        for &idx in r {
+            let b = self.positions[idx as usize];
             n.x += (a.y - b.y) * (a.z + b.z);
             n.y += (a.z - b.z) * (a.x + b.x);
             n.z += (a.x - b.x) * (a.y + b.y);
+            a = b;
         }
         n
     }
@@ -158,7 +162,10 @@ impl SculptMesh {
     /// Refreshes normals around moved vertices (their polys, then every vertex of those polys).
     /// Returns the vertices whose normals were recomputed (sorted, a superset of `moved`).
     pub fn update_normals(&mut self, moved: &[u32]) -> Vec<u32> {
-        let mut polys: Vec<u32> = moved.iter().flat_map(|&v| self.vertex_polys.row(v as usize).iter().copied()).collect();
+        let mut polys = Vec::with_capacity(moved.len() * 4);
+        for &v in moved {
+            polys.extend_from_slice(self.vertex_polys.row(v as usize));
+        }
         polys.sort_unstable();
         polys.dedup();
         let mut verts = Vec::with_capacity(polys.len() * 4);

@@ -56,92 +56,221 @@ impl Aabb {
     }
 }
 
+#[derive(Clone, Copy)]
+struct TriInfo {
+    bb: Aabb,
+    cent: Vec3,
+}
+
+#[inline]
 fn tri_box(p: &[Vec3], t: &[u32; 3]) -> Aabb {
-    let mut b = Aabb::EMPTY;
-    for &v in t {
-        b.grow(p[v as usize]);
+    let a = p[t[0] as usize];
+    let b = p[t[1] as usize];
+    let c = p[t[2] as usize];
+    Aabb { min: a.min(b).min(c), max: a.max(b).max(c) }
+}
+
+#[cfg(feature = "threads")]
+const PARALLEL_BUILD_MIN: usize = 8192;
+
+#[inline]
+fn compute_bounds_and_split(ids: &mut [u32], info: &[TriInfo]) -> (Aabb, Option<usize>) {
+    let count = ids.len();
+    let mut bb = Aabb::EMPTY;
+    let mut cb = Aabb::EMPTY;
+    for &t in ids.iter() {
+        let ti = &info[t as usize];
+        bb.union(&ti.bb);
+        cb.grow(ti.cent);
     }
-    b
+    if count <= LEAF {
+        return (bb, None);
+    }
+    let ext = cb.max - cb.min;
+    let axis = if ext.x >= ext.y && ext.x >= ext.z { 0 } else if ext.y >= ext.z { 1 } else { 2 };
+    if ext[axis] <= 0.0 {
+        return (bb, None); // all centroids coincide: keep a (rare) fat leaf
+    }
+    let min_c = cb.min[axis];
+    let scale = BINS as f32 / ext[axis];
+    let bin_of = |t: u32| (((info[t as usize].cent[axis] - min_c) * scale) as usize).min(BINS - 1);
+    let mut bins = [(Aabb::EMPTY, 0u32); BINS];
+    for &t in ids.iter() {
+        let b = &mut bins[bin_of(t)];
+        b.0.union(&info[t as usize].bb);
+        b.1 += 1;
+    }
+    let mut right_area = [0f32; BINS];
+    let mut acc = (Aabb::EMPTY, 0u32);
+    for i in (1..BINS).rev() {
+        acc.0.union(&bins[i].0);
+        acc.1 += bins[i].1;
+        right_area[i] = acc.0.area() * acc.1 as f32;
+    }
+    let mut best = (f32::INFINITY, 0);
+    let mut left = (Aabb::EMPTY, 0u32);
+    for i in 0..BINS - 1 {
+        left.0.union(&bins[i].0);
+        left.1 += bins[i].1;
+        let cost = left.0.area() * left.1 as f32 + right_area[i + 1];
+        if left.1 > 0 && (left.1 as usize) < count && cost < best.0 {
+            best = (cost, i);
+        }
+    }
+    if best.0 >= bb.area() * count as f32 && count <= 16 {
+        return (bb, None);
+    }
+    let (mut i, mut j) = (0usize, count);
+    while i < j {
+        if bin_of(ids[i]) <= best.1 {
+            i += 1;
+        } else {
+            j -= 1;
+            ids.swap(i, j);
+        }
+    }
+    if i == 0 || i == count {
+        return (bb, None);
+    }
+    (bb, Some(i))
+}
+
+fn build_seq(ids: &mut [u32], first_base: u32, info: &[TriInfo]) -> Vec<Node> {
+    let n = ids.len();
+    let mut nodes = Vec::with_capacity(2 * n / LEAF + 1);
+    nodes.push(Node { left_first: 0, count: n as u32, ..Default::default() });
+    let mut stack = Vec::with_capacity(64);
+    stack.push((0usize, 0usize, n));
+    while let Some((ni, rel_first, count)) = stack.pop() {
+        let slice = &mut ids[rel_first..rel_first + count];
+        let (bb, split) = compute_bounds_and_split(slice, info);
+        nodes[ni].min = bb.min.to_array();
+        nodes[ni].max = bb.max.to_array();
+        let Some(i) = split else {
+            nodes[ni].left_first = first_base + rel_first as u32;
+            nodes[ni].count = count as u32;
+            continue;
+        };
+        let l = nodes.len();
+        nodes.push(Node::default());
+        nodes.push(Node::default());
+        nodes[ni].left_first = l as u32;
+        nodes[ni].count = 0;
+        stack.push((l + 1, rel_first + i, count - i));
+        stack.push((l, rel_first, i));
+    }
+    nodes
+}
+
+#[cfg(feature = "threads")]
+fn build_par(ids: &mut [u32], first_base: u32, info: &[TriInfo]) -> Vec<Node> {
+    if ids.len() < PARALLEL_BUILD_MIN {
+        return build_seq(ids, first_base, info);
+    }
+    let (bb, split) = compute_bounds_and_split(ids, info);
+    let Some(split_idx) = split else {
+        return vec![Node { min: bb.min.to_array(), left_first: first_base, max: bb.max.to_array(), count: ids.len() as u32 }];
+    };
+    let (left_ids, right_ids) = ids.split_at_mut(split_idx);
+    let (mut lnodes, mut rnodes) = rayon::join(
+        || build_par(left_ids, first_base, info),
+        || build_par(right_ids, first_base + split_idx as u32, info),
+    );
+    let l_len = lnodes.len();
+    let r_start = 2 + l_len;
+    let mut out = Vec::with_capacity(1 + l_len + rnodes.len());
+    out.push(Node { min: bb.min.to_array(), left_first: 1, max: bb.max.to_array(), count: 0 });
+    for n in &mut lnodes {
+        if n.count == 0 {
+            n.left_first += 2;
+        }
+    }
+    let r_shift = (r_start - 1) as u32;
+    for n in &mut rnodes {
+        if n.count == 0 {
+            n.left_first += r_shift;
+        }
+    }
+    out.push(lnodes[0]);
+    out.push(rnodes[0]);
+    out.extend_from_slice(&lnodes[1..]);
+    out.extend_from_slice(&rnodes[1..]);
+    out
+}
+
+/// Fixed-capacity stack with heap overflow for panic-free, zero-alloc BVH traversal.
+struct LocalStack {
+    buf: [usize; 64],
+    len: usize,
+    overflow: Vec<usize>,
+}
+impl LocalStack {
+    #[inline(always)]
+    fn new() -> Self {
+        LocalStack { buf: [0; 64], len: 0, overflow: Vec::new() }
+    }
+    #[inline(always)]
+    fn push(&mut self, v: usize) {
+        if self.len < 64 {
+            self.buf[self.len] = v;
+            self.len += 1;
+        } else {
+            self.overflow.push(v);
+        }
+    }
+    #[inline(always)]
+    fn pop(&mut self) -> Option<usize> {
+        if !self.overflow.is_empty() {
+            return self.overflow.pop();
+        }
+        if self.len > 0 {
+            self.len -= 1;
+            Some(self.buf[self.len])
+        } else {
+            None
+        }
+    }
 }
 
 impl Bvh {
     pub fn build(positions: &[Vec3], tris: &[[u32; 3]]) -> Bvh {
         let n = tris.len();
-        let mut bvh = Bvh { nodes: Vec::with_capacity(2 * n / LEAF + 1), tri_ids: (0..n as u32).collect(), slack: 0.0 };
-        let boxes: Vec<Aabb> = tris.iter().map(|t| tri_box(positions, t)).collect();
-        let cents: Vec<Vec3> = boxes.iter().map(|b| (b.min + b.max) * 0.5).collect();
-        bvh.nodes.push(Node { left_first: 0, count: n as u32, ..Default::default() });
-        let mut stack = vec![0usize];
-        while let Some(ni) = stack.pop() {
-            let (first, count) = (bvh.nodes[ni].left_first as usize, bvh.nodes[ni].count as usize);
-            let ids = &mut bvh.tri_ids[first..first + count];
-            let mut bb = Aabb::EMPTY;
-            let mut cb = Aabb::EMPTY;
-            for &t in ids.iter() {
-                bb.union(&boxes[t as usize]);
-                cb.grow(cents[t as usize]);
-            }
-            bvh.nodes[ni].min = bb.min.to_array();
-            bvh.nodes[ni].max = bb.max.to_array();
-            if count <= LEAF {
-                continue;
-            }
-            // Binned SAH on the axis with the widest centroid spread.
-            let ext = cb.max - cb.min;
-            let axis = if ext.x >= ext.y && ext.x >= ext.z { 0 } else if ext.y >= ext.z { 1 } else { 2 };
-            if ext[axis] <= 0.0 {
-                continue; // all centroids coincide: keep a (rare) fat leaf
-            }
-            let scale = BINS as f32 / ext[axis];
-            let bin_of = |t: u32| (((cents[t as usize][axis] - cb.min[axis]) * scale) as usize).min(BINS - 1);
-            let mut bins = [(Aabb::EMPTY, 0usize); BINS];
-            for &t in ids.iter() {
-                let b = &mut bins[bin_of(t)];
-                b.0.union(&boxes[t as usize]);
-                b.1 += 1;
-            }
-            let mut right_area = [0f32; BINS];
-            let mut acc = (Aabb::EMPTY, 0usize);
-            for i in (1..BINS).rev() {
-                acc.0.union(&bins[i].0);
-                acc.1 += bins[i].1;
-                right_area[i] = acc.0.area() * acc.1 as f32;
-            }
-            let mut best = (f32::INFINITY, 0);
-            let mut left = (Aabb::EMPTY, 0usize);
-            for i in 0..BINS - 1 {
-                left.0.union(&bins[i].0);
-                left.1 += bins[i].1;
-                let cost = left.0.area() * left.1 as f32 + right_area[i + 1];
-                if left.1 > 0 && left.1 < count && cost < best.0 {
-                    best = (cost, i);
-                }
-            }
-            if best.0 >= bb.area() * count as f32 && count <= 16 {
-                continue; // splitting doesn't pay
-            }
-            // Partition by bin.
-            let (mut i, mut j) = (0usize, count);
-            while i < j {
-                if bin_of(ids[i]) <= best.1 {
-                    i += 1;
-                } else {
-                    j -= 1;
-                    ids.swap(i, j);
-                }
-            }
-            if i == 0 || i == count {
-                continue;
-            }
-            let l = bvh.nodes.len();
-            bvh.nodes.push(Node { left_first: first as u32, count: i as u32, ..Default::default() });
-            bvh.nodes.push(Node { left_first: (first + i) as u32, count: (count - i) as u32, ..Default::default() });
-            bvh.nodes[ni].left_first = l as u32;
-            bvh.nodes[ni].count = 0;
-            stack.push(l + 1);
-            stack.push(l);
+        if n == 0 {
+            return Bvh::default();
         }
-        bvh
+        let mut tri_ids: Vec<u32> = (0..n as u32).collect();
+        #[cfg(feature = "threads")]
+        let info: Vec<TriInfo> = if n >= 4096 {
+            use rayon::prelude::*;
+            tris.par_iter()
+                .map(|t| {
+                    let bb = tri_box(positions, t);
+                    TriInfo { bb, cent: (bb.min + bb.max) * 0.5 }
+                })
+                .collect()
+        } else {
+            tris.iter()
+                .map(|t| {
+                    let bb = tri_box(positions, t);
+                    TriInfo { bb, cent: (bb.min + bb.max) * 0.5 }
+                })
+                .collect()
+        };
+        #[cfg(not(feature = "threads"))]
+        let info: Vec<TriInfo> = tris
+            .iter()
+            .map(|t| {
+                let bb = tri_box(positions, t);
+                TriInfo { bb, cent: (bb.min + bb.max) * 0.5 }
+            })
+            .collect();
+
+        #[cfg(feature = "threads")]
+        let nodes = build_par(&mut tri_ids, 0, &info);
+        #[cfg(not(feature = "threads"))]
+        let nodes = build_seq(&mut tri_ids, 0, &info);
+
+        Bvh { nodes, tri_ids, slack: 0.0 }
     }
 
     /// Recomputes every box bottom up (children always come after their parent) and clears the slack.
@@ -164,8 +293,8 @@ impl Bvh {
         self.slack = 0.0;
     }
 
-    fn slab(&self, n: &Node, o: Vec3, inv: Vec3, tmax: f32) -> Option<f32> {
-        let s = Vec3::splat(self.slack);
+    #[inline(always)]
+    fn slab(&self, n: &Node, o: Vec3, inv: Vec3, s: Vec3, tmax: f32) -> Option<f32> {
         let t0 = (Vec3::from(n.min) - s - o) * inv;
         let t1 = (Vec3::from(n.max) + s - o) * inv;
         let lo = t0.min(t1).max_element().max(0.0);
@@ -179,17 +308,19 @@ impl Bvh {
             return None;
         }
         let inv = dir.recip();
+        let s = Vec3::splat(self.slack);
         let mut best: Option<Hit> = None;
         let mut tmax = f32::INFINITY;
-        let mut stack = Vec::with_capacity(64);
-        if self.slab(&self.nodes[0], o, inv, tmax).is_some() {
+        let mut stack = LocalStack::new();
+        if self.slab(&self.nodes[0], o, inv, s, tmax).is_some() {
             stack.push(0usize);
         }
         while let Some(ni) = stack.pop() {
             let n = &self.nodes[ni];
             if n.count > 0 {
                 for &t in &self.tri_ids[n.left_first as usize..(n.left_first + n.count) as usize] {
-                    let [a, b, c] = tris[t as usize].map(|v| positions[v as usize]);
+                    let tri = tris[t as usize];
+                    let (a, b, c) = (positions[tri[0] as usize], positions[tri[1] as usize], positions[tri[2] as usize]);
                     if let Some(tt) = ray_tri(o, dir, a, b, c) {
                         if tt < tmax {
                             tmax = tt;
@@ -200,12 +331,18 @@ impl Bvh {
                 continue;
             }
             let (l, r) = (n.left_first as usize, n.left_first as usize + 1);
-            let dl = self.slab(&self.nodes[l], o, inv, tmax);
-            let dr = self.slab(&self.nodes[r], o, inv, tmax);
+            let dl = self.slab(&self.nodes[l], o, inv, s, tmax);
+            let dr = self.slab(&self.nodes[r], o, inv, s, tmax);
             // Push the farther child first so the nearer one is visited first.
             match (dl, dr) {
-                (Some(a), Some(b)) if a <= b => stack.extend([r, l]),
-                (Some(_), Some(_)) => stack.extend([l, r]),
+                (Some(a), Some(b)) if a <= b => {
+                    stack.push(r);
+                    stack.push(l);
+                }
+                (Some(_), Some(_)) => {
+                    stack.push(l);
+                    stack.push(r);
+                }
                 (Some(_), None) => stack.push(l),
                 (None, Some(_)) => stack.push(r),
                 (None, None) => {}
@@ -218,20 +355,24 @@ impl Bvh {
     /// `stamp` must have one entry per vertex; it is reused across calls to avoid clearing.
     pub fn sphere_vertices(&self, positions: &[Vec3], tris: &[[u32; 3]], c: Vec3, r: f32, stamp: &mut Stamp, out: &mut Vec<u32>) {
         out.clear();
-        if self.nodes.is_empty() {
+        if self.nodes.is_empty() || !(r > 0.0) {
             return;
         }
         let tag = stamp.next();
         let reach = r + self.slack;
-        let mut stack = vec![0usize];
+        let reach2 = reach * reach;
+        let r2 = r * r;
+        let mut stack = LocalStack::new();
+        stack.push(0usize);
         while let Some(ni) = stack.pop() {
             let n = &self.nodes[ni];
             let q = c.clamp(Vec3::from(n.min), Vec3::from(n.max));
-            if (q - c).length_squared() > reach * reach {
+            if (q - c).length_squared() > reach2 {
                 continue;
             }
             if n.count == 0 {
-                stack.extend([n.left_first as usize, n.left_first as usize + 1]);
+                stack.push(n.left_first as usize);
+                stack.push(n.left_first as usize + 1);
                 continue;
             }
             for &t in &self.tri_ids[n.left_first as usize..(n.left_first + n.count) as usize] {
@@ -239,7 +380,7 @@ impl Bvh {
                     let s = &mut stamp.marks[v as usize];
                     if *s != tag {
                         *s = tag;
-                        if (positions[v as usize] - c).length() < r {
+                        if (positions[v as usize] - c).length_squared() < r2 {
                             out.push(v);
                         }
                     }
@@ -321,18 +462,24 @@ mod tests {
 
     #[test]
     fn every_triangle_once_and_boxes_contain() {
-        let m = SculptMesh::from_mesh(&uv_sphere(10.0, 64, 32));
-        let b = Bvh::build(&m.positions, &m.tris);
-        let mut ids = b.tri_ids.clone();
-        ids.sort_unstable();
-        assert_eq!(ids, (0..m.tris.len() as u32).collect::<Vec<_>>());
-        let leaves: u32 = b.nodes.iter().map(|n| n.count).sum();
-        assert_eq!(leaves as usize, m.tris.len());
-        for n in b.nodes.iter().filter(|n| n.count > 0) {
-            for &t in &b.tri_ids[n.left_first as usize..(n.left_first + n.count) as usize] {
-                for &v in &m.tris[t as usize] {
-                    let p = m.positions[v as usize];
-                    assert!(p.cmpge(Vec3::from(n.min)).all() && p.cmple(Vec3::from(n.max)).all());
+        for (seg, rings) in [(64, 32), (128, 64)] {
+            let m = SculptMesh::from_mesh(&uv_sphere(10.0, seg, rings));
+            let b = Bvh::build(&m.positions, &m.tris);
+            let mut ids = b.tri_ids.clone();
+            ids.sort_unstable();
+            assert_eq!(ids, (0..m.tris.len() as u32).collect::<Vec<_>>());
+            let leaves: u32 = b.nodes.iter().map(|n| n.count).sum();
+            assert_eq!(leaves as usize, m.tris.len());
+            for (ni, n) in b.nodes.iter().enumerate() {
+                if n.count == 0 {
+                    assert!(n.left_first as usize > ni, "parent {ni} must precede children");
+                } else {
+                    for &t in &b.tri_ids[n.left_first as usize..(n.left_first + n.count) as usize] {
+                        for &v in &m.tris[t as usize] {
+                            let p = m.positions[v as usize];
+                            assert!(p.cmpge(Vec3::from(n.min)).all() && p.cmple(Vec3::from(n.max)).all());
+                        }
+                    }
                 }
             }
         }

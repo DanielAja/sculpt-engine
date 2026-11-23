@@ -139,6 +139,8 @@ struct GpuObject {
     world: Mat4,
     material: Material,
     highlight: bool,
+    visible: bool,
+    local_bounds: (Vec3, Vec3),
     bounds: (Vec3, Vec3),
 }
 
@@ -529,8 +531,23 @@ impl Renderer {
         };
         let ubuf = d.create_buffer(&wgpu::BufferDescriptor { label: Some(id), size: std::mem::size_of::<ObjectU>() as u64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
         let bind = d.create_bind_group(&wgpu::BindGroupDescriptor { label: Some(id), layout: &self.l_object, entries: &[wgpu::BindGroupEntry { binding: 0, resource: ubuf.as_entire_binding() }] });
+        let local_bounds = local_bounds(&mesh.positions);
         let bounds = world_bounds(&mesh.positions, world);
-        let o = GpuObject { id: id.into(), vbuf, ibuf, count, smooth: mesh.smooth_shading, ubuf, bind, world, material: material.clone(), highlight: false, bounds };
+        let o = GpuObject {
+            id: id.into(),
+            vbuf,
+            ibuf,
+            count,
+            smooth: mesh.smooth_shading,
+            ubuf,
+            bind,
+            world,
+            material: material.clone(),
+            highlight: false,
+            visible: true,
+            local_bounds,
+            bounds,
+        };
         self.write_object(&o);
         match self.objects.iter().position(|x| x.id == id) {
             Some(i) => self.objects[i] = o,
@@ -569,6 +586,7 @@ impl Renderer {
             let v = flat_vertices(mesh);
             self.gpu.queue.write_buffer(&o.vbuf, 0, bytemuck::cast_slice(&v));
         }
+        o.local_bounds = local_bounds(&mesh.positions);
         o.bounds = world_bounds(&mesh.positions, o.world);
         self.shadow_dirty = true;
     }
@@ -578,10 +596,40 @@ impl Renderer {
         self.shadow_dirty = true;
     }
 
+    pub fn set_transform(&mut self, id: &str, world: Mat4) -> bool {
+        let Some(i) = self.objects.iter().position(|x| x.id == id) else { return false };
+        if self.objects[i].world == world {
+            return true;
+        }
+        self.objects[i].world = world;
+        self.objects[i].bounds = box_world_bounds(self.objects[i].local_bounds, world);
+        self.write_object(&self.objects[i]);
+        self.shadow_dirty = true;
+        true
+    }
+
+    pub fn set_material(&mut self, id: &str, material: &Material) -> bool {
+        let Some(i) = self.objects.iter().position(|x| x.id == id) else { return false };
+        self.objects[i].material = material.clone();
+        self.write_object(&self.objects[i]);
+        true
+    }
+
+    pub fn set_visible(&mut self, id: &str, visible: bool) -> bool {
+        let Some(i) = self.objects.iter().position(|x| x.id == id) else { return false };
+        if self.objects[i].visible != visible {
+            self.objects[i].visible = visible;
+            self.shadow_dirty = true;
+        }
+        true
+    }
+
     pub fn set_highlight(&mut self, id: &str, on: bool) {
         if let Some(i) = self.objects.iter().position(|x| x.id == id) {
-            self.objects[i].highlight = on;
-            self.write_object(&self.objects[i]);
+            if self.objects[i].highlight != on {
+                self.objects[i].highlight = on;
+                self.write_object(&self.objects[i]);
+            }
         }
     }
 
@@ -597,6 +645,9 @@ impl Renderer {
     pub fn scene_bounds(&self) -> (Vec3, Vec3) {
         let mut b = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
         for o in &self.objects {
+            if !o.visible {
+                continue;
+            }
             b.0 = b.0.min(o.bounds.0);
             b.1 = b.1.max(o.bounds.1);
         }
@@ -646,6 +697,9 @@ impl Renderer {
 
     fn draw_objects<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
         for o in &self.objects {
+            if !o.visible {
+                continue;
+            }
             pass.set_bind_group(1, &o.bind, &[]);
             pass.set_vertex_buffer(0, o.vbuf.slice(..));
             match &o.ibuf {
@@ -828,6 +882,32 @@ fn ortho_rh(half: f32, far: f32) -> Mat4 {
 fn flat_vertices(mesh: &SculptMesh) -> Vec<Vertex> {
     let (p, n) = mesh.flat_buffers();
     p.iter().zip(&n).map(|(p, n)| Vertex { pos: p.to_array(), nrm: n.to_array() }).collect()
+}
+
+fn local_bounds(positions: &[Vec3]) -> (Vec3, Vec3) {
+    let mut b = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
+    for &p in positions {
+        b.0 = b.0.min(p);
+        b.1 = b.1.max(p);
+    }
+    b
+}
+
+fn box_world_bounds((lo, hi): (Vec3, Vec3), world: Mat4) -> (Vec3, Vec3) {
+    if lo.x > hi.x {
+        return (lo, hi);
+    }
+    let mut b = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
+    for x in [lo.x, hi.x] {
+        for y in [lo.y, hi.y] {
+            for z in [lo.z, hi.z] {
+                let w = world.transform_point3(Vec3::new(x, y, z));
+                b.0 = b.0.min(w);
+                b.1 = b.1.max(w);
+            }
+        }
+    }
+    b
 }
 
 fn world_bounds(positions: &[Vec3], world: Mat4) -> (Vec3, Vec3) {

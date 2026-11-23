@@ -153,6 +153,25 @@ impl Session {
         self.renderer.remove(id);
     }
 
+    pub fn set_transform(&mut self, id: &str, world: Mat4) -> bool {
+        let Some(o) = self.objects.iter_mut().find(|o| o.id == id) else { return false };
+        o.world = world;
+        if let Some(t) = self.targets.get_mut(id) {
+            t.set_world(world);
+        }
+        self.renderer.set_transform(id, world)
+    }
+
+    pub fn set_material(&mut self, id: &str, material: Material) -> bool {
+        let Some(o) = self.objects.iter_mut().find(|o| o.id == id) else { return false };
+        o.material = material;
+        self.renderer.set_material(id, &o.material)
+    }
+
+    pub fn set_visible(&mut self, id: &str, visible: bool) -> bool {
+        self.renderer.set_visible(id, visible)
+    }
+
     /// Screen position (pixels, top left origin) and clip depth of a world point; None behind the camera.
     pub fn project(&self, p: Vec3) -> Option<(f32, f32, f32)> {
         let c = self.camera.view_projection(self.aspect()) * p.extend(1.0);

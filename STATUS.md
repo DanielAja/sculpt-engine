@@ -16,19 +16,23 @@ Remote: github.com/DanielAja/sculpt-engine (private). `main` and each milestone 
 | E5 to E7, E1b | Not started. |
 | **Text to 3D** | **Done on branch `text-to-3d`** (2026-11-16). `src/text3d`: shape programs (SDF/CSG JSON), built-in planner, LLM prompt and schema, and Surface Nets with manifold output. wasm and uniffi bindings (the Swift bindings in `apple/SculptEngine` are regenerated; the xcframework itself was not rebuilt). sculptor.web "Make it" uses it. 14 new unit tests (34 in the crate): every template is manifold at the default detail and at Dream Builder's 8,000-triangle budget. wasm 2.47 MB raw, 0.77 MB brotli. See `docs/text-to-3d.md`. |
 
-### E1 benchmarks (M-class Mac, shared machine, load 15 to 28, `cargo bench --bench core`)
-
-| Bench | Time | Budget (DESIGN.md §8, desktop) |
+| E1 benchmarks (2026-11-23 optimization pass) | Measured | Budget |
 |---|---|---|
-| `SculptMesh` from a 1 M triangle mesh | 18.7 ms | |
-| BVH build, 100 k triangles | 12.3 ms | |
-| BVH build, 1 M triangles | 168 ms | < 60 ms: over. Build is single-threaded; parallel subtree build is the fix. |
-| BVH refit, 1 M | 4.0 ms | Dabs don't refit: the BVH "slack" only triggers a refit after drift of a quarter of the radius. |
-| Ray pick, 1 M | 1.4 µs | |
-| Dab, small footprint (~1.2 k vertices) | 0.10 to 0.18 ms | |
-| Dab, large footprint (~20 k vertices) | 1.8 to 2.9 ms | < 1 ms per 10 k: about 1.1 to 1.4 ms per 10 k, so slightly over (under load). |
-| `.sculpt` encode, 1 M triangles (88 MB JSON) | 246 ms | |
-| `.sculpt` decode, 1 M triangles | 135 ms | < 300 ms: met. |
+| `SculptMesh` from 1 M triangles | 18.37 ms | |
+| BVH build, 100 k triangles | 3.44 ms (down from 12.81 ms, -73%) | |
+| BVH build, 1 M triangles | 42.18 ms (down from 159.03 ms, -73%) | **< 60 ms: met** |
+| BVH refit, 1 M | 3.31 ms | |
+| Ray pick, 1 M | 380.8 ns | |
+| Dab, small footprint (~2.5 k verts) | 73.4–75.8 µs (down from 79.8–100.2 µs) | |
+| Dab, large footprint (~40 k verts) | 1.30–1.37 ms (down from 1.36–1.48 ms) | |
+| `.sculpt` encode / decode, 1 M triangles | 278.9 ms / 132.1 ms | < 300 ms: met |
+
+Optimization pass (2026-11-23):
+- Parallelized `Bvh::build` (`rayon::join` subtree build + parallel triangle bounds/centroids) and eliminated heap allocations in `Bvh::ray` / `Bvh::sphere_vertices` (`LocalStack`) and per-vertex `sqrt` in `sphere_vertices`.
+- Optimized `brush::dab` (stack-allocated symmetry centers, `length_squared` falloff, deferred `sqrt`, monomorphized `par_map`) and `mesh::SculptMesh` (`newell` modulo removal, pre-reserved `update_normals` / `tris`).
+- Parallelized `text3d::mesher::surface_nets` SDF field evaluation over Z slices (`rayon::par_chunks_mut`), eliminated per-cell/per-face `Vec` allocations, and added O(1) `EDGE_LOOKUP`. All 38 release unit tests (including `every_template_meshes_closed_within_budget` in 6.12s) and 3 render tests pass.
+- Added host scene setters (`set_transform`, `set_material`, `set_visible`) to `Renderer`, `Session`, `EngineView` (`ffi`), and `WebEngine` (`wasm`), and cached the headless snapshot `Renderer` in `ffi::render_snapshot` (`SNAPSHOT_RENDERER`).
+- Rebuilt `apple/SculptEngine.xcframework` (5 Apple slices: iOS, iOS sim, macOS, visionOS, visionOS sim) + `SculptEngine.swift` bindings, and `web/pkg/` WASM (2.47 MB raw, 0.78 MB brotli).
 
 ### E2 frame time (Apple M4, 1920x1080, offscreen with a GPU wait per frame, `viewer --bench`)
 

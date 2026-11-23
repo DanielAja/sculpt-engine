@@ -40,10 +40,43 @@ pub fn surface_nets(f: &Compiled, grid: &Grid) -> Mesh {
     let h = grid.h;
     let idx = |i: usize, j: usize, k: usize| (k * ny + j) * nx + i;
     let mut field = vec![0f32; nx * ny * nz];
-    for k in 0..nz {
-        for j in 0..ny {
-            for i in 0..nx {
-                field[idx(i, j, k)] = f.eval(grid.origin + Vec3::new(i as f32, j as f32, k as f32) * h);
+    let slice_len = nx * ny;
+    #[cfg(feature = "threads")]
+    if field.len() >= 4096 {
+        use rayon::prelude::*;
+        field.par_chunks_mut(slice_len).enumerate().for_each(|(k, slice)| {
+            let z = grid.origin.z + k as f32 * h;
+            for j in 0..ny {
+                let y = grid.origin.y + j as f32 * h;
+                let row = &mut slice[j * nx..(j + 1) * nx];
+                for (i, cell) in row.iter_mut().enumerate() {
+                    *cell = f.eval(Vec3::new(grid.origin.x + i as f32 * h, y, z));
+                }
+            }
+        });
+    } else {
+        for k in 0..nz {
+            let z = grid.origin.z + k as f32 * h;
+            for j in 0..ny {
+                let y = grid.origin.y + j as f32 * h;
+                let base = (k * ny + j) * nx;
+                for i in 0..nx {
+                    field[base + i] = f.eval(Vec3::new(grid.origin.x + i as f32 * h, y, z));
+                }
+            }
+        }
+    }
+    #[cfg(not(feature = "threads"))]
+    {
+        let _ = slice_len;
+        for k in 0..nz {
+            let z = grid.origin.z + k as f32 * h;
+            for j in 0..ny {
+                let y = grid.origin.y + j as f32 * h;
+                let base = (k * ny + j) * nx;
+                for i in 0..nx {
+                    field[base + i] = f.eval(Vec3::new(grid.origin.x + i as f32 * h, y, z));
+                }
             }
         }
     }
@@ -58,6 +91,7 @@ pub fn surface_nets(f: &Compiled, grid: &Grid) -> Mesh {
     let mut cell_slot = vec![u32::MAX; cx * cy * cz];
     let mut slots: Vec<[u32; 12]> = Vec::new();
     let mut positions: Vec<Vec3> = Vec::new();
+    let h2 = h * h;
     for k in 0..cz {
         for j in 0..cy {
             for i in 0..cx {
@@ -72,7 +106,13 @@ pub fn surface_nets(f: &Compiled, grid: &Grid) -> Mesh {
                 if mask == 0 || mask == 255 {
                     continue;
                 }
-                let crosses = |e: usize| (v[EDGES[e].0] < 0.0) != (v[EDGES[e].1] < 0.0);
+                let mut edge_crosses = [false; 12];
+                let mut total_crosses = 0usize;
+                for e in 0..12 {
+                    let cr = (v[EDGES[e].0] < 0.0) != (v[EDGES[e].1] < 0.0);
+                    edge_crosses[e] = cr;
+                    total_crosses += cr as usize;
+                }
                 let mut comp: [usize; 12] = std::array::from_fn(|e| e);
                 fn root(c: &mut [usize; 12], mut x: usize) -> usize {
                     while c[x] != x {
@@ -85,8 +125,15 @@ pub fn surface_nets(f: &Compiled, grid: &Grid) -> Mesh {
                     c[ra] = rb;
                 };
                 for face in FACES.iter() {
-                    let cr: Vec<usize> = (0..4).filter(|&n| crosses(face.edges[n])).collect();
-                    match cr.len() {
+                    let mut cr = [0usize; 4];
+                    let mut cr_len = 0usize;
+                    for n in 0..4 {
+                        if edge_crosses[face.edges[n]] {
+                            cr[cr_len] = n;
+                            cr_len += 1;
+                        }
+                    }
+                    match cr_len {
                         2 => join(&mut comp, face.edges[cr[0]], face.edges[cr[1]]),
                         4 => {
                             let [a, b, c, d] = face.corners.map(|n| v[n]);
@@ -111,29 +158,31 @@ pub fn surface_nets(f: &Compiled, grid: &Grid) -> Mesh {
                 let cell_min = grid.origin + Vec3::new(i as f32, j as f32, k as f32) * h;
                 let mut slot = [u32::MAX; 12];
                 for e in 0..12 {
-                    if !crosses(e) || slot[e] != u32::MAX {
+                    if !edge_crosses[e] || slot[e] != u32::MAX {
                         continue;
                     }
                     let r = root(&mut comp, e);
                     let mut sum = Vec3::ZERO;
                     let mut count = 0.0;
-                    let mut members = Vec::new();
+                    let mut members = [0usize; 12];
+                    let mut m_len = 0usize;
                     for e2 in 0..12 {
-                        if crosses(e2) && root(&mut comp, e2) == r {
+                        if edge_crosses[e2] && root(&mut comp, e2) == r {
                             let (a, b) = EDGES[e2];
                             let t = v[a] / (v[a] - v[b]);
                             let pa = Vec3::new(CORNERS[a][0] as f32, CORNERS[a][1] as f32, CORNERS[a][2] as f32);
                             let pb = Vec3::new(CORNERS[b][0] as f32, CORNERS[b][1] as f32, CORNERS[b][2] as f32);
                             sum += pa + (pb - pa) * t;
                             count += 1.0;
-                            members.push(e2);
+                            members[m_len] = e2;
+                            m_len += 1;
                         }
                     }
                     let start = cell_min + sum / count * h;
                     // Newton steps toward the zero set (only for single-component cells: in a saddle cell the
                     // nearest surface may belong to the other sheet).
                     let mut p = start;
-                    if members.len() == (0..12).filter(|&e| crosses(e)).count() {
+                    if m_len == total_crosses {
                         for _ in 0..2 {
                             let d = f.eval(p);
                             let g = gradient(f, p, h * 0.25);
@@ -143,13 +192,13 @@ pub fn surface_nets(f: &Compiled, grid: &Grid) -> Mesh {
                             }
                             p -= g * (d / g2);
                         }
-                        if !p.is_finite() || (p - start).length() > h {
+                        if !p.is_finite() || (p - start).length_squared() > h2 {
                             p = start;
                         }
                     }
                     let id = positions.len() as u32;
                     positions.push(p);
-                    for e2 in members {
+                    for &e2 in &members[..m_len] {
                         slot[e2] = id;
                     }
                 }
@@ -161,7 +210,7 @@ pub fn surface_nets(f: &Compiled, grid: &Grid) -> Mesh {
 
     // One quad per sample edge with a sign change, joining the four cells around it (each cell contributes
     // the vertex of the component that this edge belongs to).
-    let mut faces: Vec<Vec<u32>> = Vec::new();
+    let mut faces: Vec<Vec<u32>> = Vec::with_capacity(slots.len() * 3);
     for k in 0..nz {
         for j in 0..ny {
             for i in 0..nx {
@@ -193,7 +242,7 @@ pub fn surface_nets(f: &Compiled, grid: &Grid) -> Mesh {
                         }
                         let c0 = off[0] | off[1] << 1 | off[2] << 2;
                         let c1 = c0 | 1 << a;
-                        let e = EDGES.iter().position(|&(x, y)| (x == c0 && y == c1) || (x == c1 && y == c0)).unwrap();
+                        let e = EDGE_LOOKUP[c0][c1] as usize;
                         slots[sl as usize][e]
                     };
                     let quad = [cell(0, 0), cell(1, 0), cell(1, 1), cell(0, 1)];
@@ -214,6 +263,17 @@ pub fn surface_nets(f: &Compiled, grid: &Grid) -> Mesh {
 
 const CORNERS: [[usize; 3]; 8] = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0], [0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1]];
 const EDGES: [(usize, usize); 12] = [(0, 1), (2, 3), (4, 5), (6, 7), (0, 2), (1, 3), (4, 6), (5, 7), (0, 4), (1, 5), (2, 6), (3, 7)];
+const EDGE_LOOKUP: [[u8; 8]; 8] = {
+    let mut table = [[255u8; 8]; 8];
+    let mut i = 0;
+    while i < 12 {
+        let (a, b) = EDGES[i];
+        table[a][b] = i as u8;
+        table[b][a] = i as u8;
+        i += 1;
+    }
+    table
+};
 
 /// A cell face: its corners in cyclic order and edges[n] joining corners[n] and corners[n + 1].
 struct Face {
