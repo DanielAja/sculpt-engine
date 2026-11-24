@@ -5,26 +5,31 @@
 use glam::{Vec2, Vec3};
 use std::f32::consts::PI;
 
+/// Direction toward the key light (shared by the shadow casting sun and the environment's softbox).
+pub const KEY_DIR: Vec3 = Vec3::new(0.35, -0.45, 1.0);
+// Pre-normalized unit vectors for `KEY_DIR` and the rim softbox (`(-0.6, 0.9, 0.5)`) so `studio()`
+// never calls `sqrt` per environment sample during IBL baking.
+const KEY_DIR_NORM: Vec3 = Vec3::new(0.304_347_82, -0.391_304_34, 0.869_565_2);
+const RIM_DIR_NORM: Vec3 = Vec3::new(-0.503_508_8, 0.755_263_2, 0.419_590_68);
+
 /// Soft studio: a cool bright ceiling, neutral horizon, darker warm floor, a large key softbox (front
 /// right, high, matching the shadow casting key light) and a rim softbox behind. Linear radiance.
+#[inline]
 pub fn studio(d: Vec3) -> Vec3 {
     let up = d.z;
     let sky = Vec3::new(0.80, 0.84, 0.92);
     let horizon = Vec3::new(0.62, 0.62, 0.62);
     let floor = Vec3::new(0.22, 0.20, 0.18);
     let mut c = if up >= 0.0 { horizon.lerp(sky, up.powf(0.6)) } else { horizon.lerp(floor, (-up).powf(0.4)) };
-    let soft = |center: Vec3, size: f32, power: f32| -> f32 {
-        let cos = d.dot(center.normalize());
-        let t = ((cos - (1.0 - size)) / size).clamp(0.0, 1.0);
+    let soft = |unit_center: Vec3, inv_size: f32, threshold: f32, power: f32| -> f32 {
+        let cos = d.dot(unit_center);
+        let t = ((cos - threshold) * inv_size).clamp(0.0, 1.0);
         power * t * t * (3.0 - 2.0 * t)
     };
-    c += Vec3::splat(soft(KEY_DIR, 0.12, 6.0));
-    c += Vec3::new(0.9, 0.95, 1.0) * soft(Vec3::new(-0.6, 0.9, 0.5), 0.06, 3.0);
+    c += Vec3::splat(soft(KEY_DIR_NORM, 1.0 / 0.12, 0.88, 6.0));
+    c += Vec3::new(0.9, 0.95, 1.0) * soft(RIM_DIR_NORM, 1.0 / 0.06, 0.94, 3.0);
     c
 }
-
-/// Direction toward the key light (shared by the shadow casting sun and the environment's softbox).
-pub const KEY_DIR: Vec3 = Vec3::new(0.35, -0.45, 1.0);
 
 /// Irradiance / pi as 9 SH coefficients (bands 0 to 2), cosine lobe already convolved.
 pub fn sh9(env: impl Fn(Vec3) -> Vec3) -> [Vec3; 9] {
@@ -100,77 +105,123 @@ fn ggx_sample(xi: Vec2, n: Vec3, a: f32) -> Vec3 {
 pub const CUBE_SIZE: u32 = 64;
 pub const CUBE_MIPS: u32 = 6;
 
+fn prefilter_face(env: &(dyn Fn(Vec3) -> Vec3 + Sync), face: usize, size: u32, a: f32, samples: u32) -> Vec<[f32; 4]> {
+    let inv_size = 2.0 / size as f32;
+    let mut out = Vec::with_capacity((size * size) as usize);
+    for y in 0..size {
+        let v = (y as f32 + 0.5) * inv_size - 1.0;
+        for x in 0..size {
+            let u = (x as f32 + 0.5) * inv_size - 1.0;
+            let n = cube_dir(face, u, v);
+            let c = if samples == 1 {
+                env(n)
+            } else {
+                let (mut sum, mut w) = (Vec3::ZERO, 0.0);
+                for i in 0..samples {
+                    let h = ggx_sample(hammersley(i, samples), n, a);
+                    let l = 2.0 * n.dot(h) * h - n;
+                    let nl = n.dot(l);
+                    if nl > 0.0 {
+                        sum += env(l) * nl;
+                        w += nl;
+                    }
+                }
+                sum / w.max(1e-6)
+            };
+            out.push([c.x, c.y, c.z, 1.0]);
+        }
+    }
+    out
+}
+
 /// GGX prefiltered cube: `[mip][face]` RGBA f32 texels, roughness = mip / (mips - 1).
 pub fn prefilter(env: &(dyn Fn(Vec3) -> Vec3 + Sync)) -> Vec<Vec<Vec<[f32; 4]>>> {
-    (0..CUBE_MIPS)
-        .map(|mip| {
-            let size = (CUBE_SIZE >> mip).max(1);
-            let rough = mip as f32 / (CUBE_MIPS - 1) as f32;
-            let a = (rough * rough).max(1e-4);
-            let samples = if mip == 0 { 1 } else { 96 };
-            (0..6)
-                .map(|face| {
-                    let mut out = Vec::with_capacity((size * size) as usize);
-                    for y in 0..size {
-                        for x in 0..size {
-                            let u = (x as f32 + 0.5) / size as f32 * 2.0 - 1.0;
-                            let v = (y as f32 + 0.5) / size as f32 * 2.0 - 1.0;
-                            let n = cube_dir(face, u, v);
-                            let c = if samples == 1 {
-                                env(n)
-                            } else {
-                                let (mut sum, mut w) = (Vec3::ZERO, 0.0);
-                                for i in 0..samples {
-                                    let h = ggx_sample(hammersley(i, samples), n, a);
-                                    let l = 2.0 * n.dot(h) * h - n;
-                                    let nl = n.dot(l);
-                                    if nl > 0.0 {
-                                        sum += env(l) * nl;
-                                        w += nl;
-                                    }
-                                }
-                                sum / w.max(1e-6)
-                            };
-                            out.push([c.x, c.y, c.z, 1.0]);
-                        }
-                    }
-                    out
-                })
-                .collect()
-        })
-        .collect()
+    #[cfg(feature = "threads")]
+    {
+        use rayon::prelude::*;
+        let jobs: Vec<(u32, usize)> = (0..CUBE_MIPS).flat_map(|mip| (0..6usize).map(move |face| (mip, face))).collect();
+        let flat: Vec<Vec<[f32; 4]>> = jobs
+            .into_par_iter()
+            .map(|(mip, face)| {
+                let size = (CUBE_SIZE >> mip).max(1);
+                let rough = mip as f32 / (CUBE_MIPS - 1) as f32;
+                let a = (rough * rough).max(1e-4);
+                let samples = if mip == 0 { 1 } else { 96 };
+                prefilter_face(env, face, size, a, samples)
+            })
+            .collect();
+        let mut iter = flat.into_iter();
+        (0..CUBE_MIPS).map(|_| (0..6).map(|_| iter.next().unwrap()).collect()).collect()
+    }
+    #[cfg(not(feature = "threads"))]
+    {
+        (0..CUBE_MIPS)
+            .map(|mip| {
+                let size = (CUBE_SIZE >> mip).max(1);
+                let rough = mip as f32 / (CUBE_MIPS - 1) as f32;
+                let a = (rough * rough).max(1e-4);
+                let samples = if mip == 0 { 1 } else { 96 };
+                (0..6).map(|face| prefilter_face(env, face, size, a, samples)).collect()
+            })
+            .collect()
+    }
 }
 
 pub const LUT_SIZE: u32 = 32;
 
+fn brdf_lut_row(y: u32) -> Vec<[f32; 2]> {
+    let n = 128u32;
+    let inv_n = 1.0 / n as f32;
+    let rough = (y as f32 + 0.5) / LUT_SIZE as f32;
+    let a = rough * rough;
+    let k = a * 0.5;
+    let one_minus_k = 1.0 - k;
+    let mut row = Vec::with_capacity(LUT_SIZE as usize);
+    for x in 0..LUT_SIZE {
+        let nv = ((x as f32 + 0.5) / LUT_SIZE as f32).max(1e-3);
+        let v = Vec3::new((1.0 - nv * nv).sqrt(), 0.0, nv);
+        let g_v = nv / (nv * one_minus_k + k);
+        let (mut sa, mut sb) = (0.0, 0.0);
+        for i in 0..n {
+            let h = ggx_sample(hammersley(i, n), Vec3::Z, a);
+            let vh = v.dot(h);
+            let l = 2.0 * vh * h - v;
+            let nl = l.z;
+            if nl > 0.0 {
+                let nh = h.z.max(0.0);
+                let vh = vh.max(0.0);
+                let g = g_v * (nl / (nl * one_minus_k + k));
+                let gv = g * vh / (nh * nv).max(1e-6);
+                let fc = (1.0 - vh).powi(5);
+                sa += (1.0 - fc) * gv;
+                sb += fc * gv;
+            }
+        }
+        row.push([sa * inv_n, sb * inv_n]);
+    }
+    row
+}
+
 /// Split sum BRDF table (scale, bias) for NdotV (x) and roughness (y), Smith GGX for IBL (k = a^2 / 2).
 pub fn brdf_lut() -> Vec<[f32; 2]> {
-    let n = 128;
-    let mut out = Vec::with_capacity((LUT_SIZE * LUT_SIZE) as usize);
-    for y in 0..LUT_SIZE {
-        let rough = (y as f32 + 0.5) / LUT_SIZE as f32;
-        let a = rough * rough;
-        for x in 0..LUT_SIZE {
-            let nv = ((x as f32 + 0.5) / LUT_SIZE as f32).max(1e-3);
-            let v = Vec3::new((1.0 - nv * nv).sqrt(), 0.0, nv);
-            let (mut sa, mut sb) = (0.0, 0.0);
-            for i in 0..n {
-                let h = ggx_sample(hammersley(i, n), Vec3::Z, a);
-                let l = 2.0 * v.dot(h) * h - v;
-                let (nl, nh, vh) = (l.z.max(0.0), h.z.max(0.0), v.dot(h).max(0.0));
-                if nl > 0.0 {
-                    let k = a / 2.0;
-                    let g = (nv / (nv * (1.0 - k) + k)) * (nl / (nl * (1.0 - k) + k));
-                    let gv = g * vh / (nh * nv).max(1e-6);
-                    let fc = (1.0 - vh).powi(5);
-                    sa += (1.0 - fc) * gv;
-                    sb += fc * gv;
-                }
-            }
-            out.push([sa / n as f32, sb / n as f32]);
+    #[cfg(feature = "threads")]
+    {
+        use rayon::prelude::*;
+        let rows: Vec<Vec<[f32; 2]>> = (0..LUT_SIZE).into_par_iter().map(brdf_lut_row).collect();
+        let mut out = Vec::with_capacity((LUT_SIZE * LUT_SIZE) as usize);
+        for r in rows {
+            out.extend_from_slice(&r);
         }
+        out
     }
-    out
+    #[cfg(not(feature = "threads"))]
+    {
+        let mut out = Vec::with_capacity((LUT_SIZE * LUT_SIZE) as usize);
+        for y in 0..LUT_SIZE {
+            out.extend_from_slice(&brdf_lut_row(y));
+        }
+        out
+    }
 }
 
 /// IEEE half from f32 (round to nearest even, saturating to inf, flushing tiny values to zero).

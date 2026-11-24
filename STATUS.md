@@ -34,6 +34,20 @@ Optimization pass (2026-11-23):
 - Added host scene setters (`set_transform`, `set_material`, `set_visible`) to `Renderer`, `Session`, `EngineView` (`ffi`), and `WebEngine` (`wasm`), and cached the headless snapshot `Renderer` in `ffi::render_snapshot` (`SNAPSHOT_RENDERER`).
 - Rebuilt `apple/SculptEngine.xcframework` (5 Apple slices: iOS, iOS sim, macOS, visionOS, visionOS sim) + `SculptEngine.swift` bindings, and `web/pkg/` WASM (2.47 MB raw, 0.78 MB brotli).
 
+### 7-Iteration Optimization & Footprint Loop (2026-11-24)
+
+| Iteration | Focus Area | Key Changes | Measured Impact |
+|---|---|---|---|
+| **Iter 1** | **Profiles & Platform `wgpu` Trim** | Trimmed `wgpu` 30 backends per target (Apple=`metal+wgsl`, Android=`vulkan+gles+wgsl`, WASM=`webgpu+webgl+wgsl`); switched `[profile.release]` to `opt-level = 3`, `lto = "thin"`, `debug = 0`, `strip = "debuginfo"`. | Apple `.a` slice: **99 MB → 22–23 MB (−77%)**; `SculptEngine.xcframework` (5 slices): **497 MB → 113 MB (−77%, −384 MB)** |
+| **Iter 2** | **`.sculpt` Streaming Encode & Single-Pass Decode** | Eliminated ~7M AST & per-float heap allocations in `format/json.rs` & `format/mod.rs` (stack `swift_float`, stack integer formatter, direct streaming mesh encode); single-pass `ProjectDe` + zero-copy `PositionsDe` + zero-alloc tri/quad dedup in `format/de.rs`. | `sculpt_format/encode_1m`: **−25.6%**; `decode_1m`: **−35.4%**; `golden_reencodes_byte_for_byte` passes 100% |
+| **Iter 3** | **BVH SIMD & FMA Slab Test** | `Vec3A` SIMD bounds & centroids in `Bvh::build` & `Bvh::refit`, tuned `PARALLEL_BUILD_MIN = 4096`, precomputed `neg_o_inv` / `s_inv` FMA slab test in `Bvh::ray`. | `bvh_build/100k`: **−25.3%** (`p = 0.05`); `bvh_build/1m`: **−47.9%**; `ray_pick/1m`: **−62.0%** |
+| **Iter 4** | **Parallel Topology & Stamped Normals** | Parallel `rayon` Newell & vertex normals + in-place insertion-sort neighbour compaction in `SculptMesh::rebuild_topology`; added zero-alloc/zero-sort `update_normals_stamped`. | `sculpt_mesh_from_1m`: **−49.3% (2.0× faster)** |
+| **Iter 5** | **Zero-Alloc Brush Dabs & Stroke Buffer Reuse** | Added `dab_and_update_normals` with reusable `poly_stamp`/`vert_stamp`/`moved_verts`, hoisted kind match outside `par_map`, reused `moved_buf` on `SculptTarget`. | `dab/draw/small`: **−85.3%**; `dab/draw/large`: **−58.3%**; `dab/flatten/large`: **−70.3%** |
+| **Iter 6** | **Text-to-3D SDF Precomputation & Surface Nets** | Precomputed inverse scale/stretch, identity transform fast-paths, and primitive constants (`Cuboid`, `Cylinder`, `Cone`, `Capsule`, `Ellipsoid`, `Pyramid`) + squared-distance CSG pruning in `sdf.rs`; precomputed `CORNERS_F32`, stride indexing, and zero-hash sorted `u64` `is_manifold` in `mesher.rs`. | `text3d/cup_8k`: **−32.5%**; `text3d/chair_8k`: **−46.8%** (`p = 0.05`); `text3d/scene_cat_table`: **−36.1%** |
+| **Iter 7** | **Parallel IBL Bake, Vertex Staging Reuse & E4.5 Binary Upload** | Pre-normalized `KEY_DIR_NORM`/`RIM_DIR_NORM` + parallel `rayon` `ibl::prefilter` & `ibl::brdf_lut`; reusable `Renderer::vertex_staging`; added zero-JSON `upsert_object_buffers` / `set_mesh_buffers` & `plan_text` across `Session`, `ffi`, and `web`. | `ibl/prefilter_and_lut`: **−28.5%** under load; zero-JSON binary mesh uploads + Kotlin UniFFI bindings (`android/bindings/uniffi/sculpt_engine/sculpt_engine.kt`) + `android/build-android.sh` |
+
+Verification (2026-11-24): 45 release unit tests pass (`cargo test -j 4 --release --lib`), zero-warning `cargo check --all-targets --features ffi` and `cargo check --target wasm32-unknown-unknown --no-default-features --features web`, rebuilt 5-slice `apple/SculptEngine.xcframework` (113 MB), `web/pkg/` WASM (2.55 MB raw / 798 KB brotli, including concurrent Nomad-grade brush & Draw3D additions), and Kotlin UniFFI bindings.
+
 ### E2 frame time (Apple M4, 1920x1080, offscreen with a GPU wait per frame, `viewer --bench`)
 
 | Scene | Full (SSAO, shadows) | No SSAO | Studio (no SSAO, no shadows) |

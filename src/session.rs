@@ -3,15 +3,76 @@
 //! brush. Hosts drive it with screen points (pixels, top left origin) and render it into their surface.
 //! The native viewer, the wasm module and the uniffi bindings are thin wrappers around this type.
 
-use crate::brush::{BrushKind, BrushParams};
+use crate::brush::{BrushKind, BrushParams, Falloff};
 use crate::camera::OrbitCamera;
-use crate::format::{FormatError, Material, Mesh, ProjectFile};
+use crate::draw3d::{build_tube_add_mesh_command, Draw3DOptions, Draw3DPoint};
+use crate::format::{set_mesh_command, FormatError, Material, Mesh, ProjectFile};
 use crate::mesh::SculptMesh;
+use crate::remesh::voxel_remesh;
 use crate::render::{world_matrix, Renderer};
 use crate::stroke::{History, SculptTarget};
 use glam::{Mat4, Vec3};
 use std::collections::HashMap;
 use std::sync::Arc;
+
+/// Builds a `Mesh` from flat binary buffers (`positions` x/y/z triples, `face_sizes` counts per n-gon,
+/// `face_indices` flattened vertex indices). Validated at the host trust boundary (zero JSON overhead).
+pub fn mesh_from_buffers(positions: &[f32], face_sizes: &[u32], face_indices: &[u32], smooth_shading: bool) -> Result<Mesh, String> {
+    if positions.len() % 3 != 0 || !positions.iter().all(|x| x.is_finite()) {
+        return Err("invalid positions: must be finite x, y, z triples".into());
+    }
+    let n = (positions.len() / 3) as u32;
+    let total: usize = face_sizes.iter().map(|&s| s as usize).sum();
+    if total != face_indices.len() {
+        return Err("face_sizes sum does not match face_indices length".into());
+    }
+    let mut faces = Vec::with_capacity(face_sizes.len());
+    let mut off = 0usize;
+    for &sz in face_sizes {
+        let len = sz as usize;
+        if len < 3 {
+            return Err("each face must have at least 3 vertices".into());
+        }
+        let slice = &face_indices[off..off + len];
+        if slice.iter().any(|&i| i >= n) {
+            return Err("face index out of bounds".into());
+        }
+        faces.push(slice.to_vec());
+        off += len;
+    }
+    let pos = positions.chunks_exact(3).map(|c| Vec3::new(c[0], c[1], c[2])).collect();
+    Ok(Mesh { positions: pos, faces, smooth_shading })
+}
+
+/// Zero-JSON binary variant of `object_from_parts` for high-throughput Sculptor host interop (E4.5).
+pub fn object_from_buffers(
+    id: &str,
+    positions: &[f32],
+    face_sizes: &[u32],
+    face_indices: &[u32],
+    smooth_shading: bool,
+    world: &[f32],
+    color: &[f32],
+    metallic: f32,
+    roughness: f32,
+) -> Result<Object, String> {
+    if world.len() != 16 || !world.iter().all(|x| x.is_finite()) || color.len() != 4 {
+        return Err("world must be 16 finite floats and color 4 floats".into());
+    }
+    let mesh = mesh_from_buffers(positions, face_sizes, face_indices, smooth_shading)?;
+    let c = |i: usize| color[i].clamp(0.0, 1.0);
+    Ok(Object {
+        id: id.to_string(),
+        mesh: Arc::new(mesh),
+        world: Mat4::from_cols_slice(world),
+        material: Material {
+            name: String::new(),
+            base_color: crate::format::Color { r: c(0), g: c(1), b: c(2), a: c(3) },
+            metallic: metallic.clamp(0.0, 1.0),
+            roughness: roughness.clamp(0.0, 1.0),
+        },
+    })
+}
 
 /// Builds an `Object` from the flat data hosts pass across the bindings (validated: this is a trust boundary).
 /// `world` is a column major 4x4; `color` is sRGB r, g, b, a.
@@ -57,6 +118,13 @@ pub struct StrokeResult {
     pub label: String,
 }
 
+struct Draw3DStroke {
+    points: Vec<Draw3DPoint>,
+    snap_surface: bool,
+    surface_offset: f32,
+    plane_depth: f32,
+}
+
 pub struct Session {
     pub renderer: Renderer,
     pub camera: OrbitCamera,
@@ -70,6 +138,7 @@ pub struct Session {
     pub project: Option<ProjectFile>,
     targets: HashMap<String, SculptTarget>,
     sculpting: Option<String>,
+    drawing3d: Option<Draw3DStroke>,
 }
 
 impl Session {
@@ -77,7 +146,7 @@ impl Session {
         Session {
             renderer,
             camera: OrbitCamera::default(),
-            brush: BrushParams { kind: BrushKind::Draw, radius: 4.0, strength: 0.6, symmetry: [true, false, false] },
+            brush: BrushParams { kind: BrushKind::Draw, radius: 4.0, strength: 0.6, symmetry: [true, false, false], ..BrushParams::default() },
             spacing: 0.25,
             size,
             objects: Vec::new(),
@@ -85,6 +154,7 @@ impl Session {
             project: None,
             targets: HashMap::new(),
             sculpting: None,
+            drawing3d: None,
         }
     }
 
@@ -229,9 +299,37 @@ impl Session {
 
     // ---- sculpting ----
 
+    pub fn set_brush_ex(
+        &mut self,
+        kind: &str,
+        radius: f32,
+        strength: f32,
+        falloff: &str,
+        sym_x: bool,
+        sym_y: bool,
+        sym_z: bool,
+        radial_count: u32,
+    ) {
+        self.brush = BrushParams {
+            kind: BrushKind::parse(kind),
+            radius: radius.max(0.1),
+            strength: strength.clamp(-1.0, 1.0),
+            symmetry: [sym_x, sym_y, sym_z],
+            falloff: Falloff::parse(falloff),
+            radial_symmetry: radial_count.clamp(1, 16),
+        };
+    }
+
     /// Starts a stroke on the object under the point. False when the point misses everything.
     pub fn sculpt_begin(&mut self, x: f32, y: f32, pressure: f32) -> bool {
-        let Some((id, _)) = self.pick(x, y) else { return false };
+        let Some((id, hit_pt)) = self.pick(x, y) else { return false };
+        if self.brush.kind == BrushKind::Grab {
+            let p = BrushParams { strength: self.brush.strength * pressure.clamp(0.0, 1.0), ..self.brush };
+            let plane_n = self.camera.backward();
+            self.target(&id).begin_grab(hit_pt, plane_n, &p);
+            self.sculpting = Some(id);
+            return true;
+        }
         self.target(&id).begin_stroke();
         self.sculpting = Some(id);
         self.sculpt_move(x, y, pressure);
@@ -244,7 +342,9 @@ impl Session {
         let p = BrushParams { strength: self.brush.strength * pressure.clamp(0.0, 1.0), ..self.brush };
         let spacing = self.spacing;
         let t = self.target(&id);
-        if let Some(h) = t.pick(o, d) {
+        if t.is_grabbing() {
+            t.drag_grab_ray(o, d);
+        } else if let Some(h) = t.pick(o, d) {
             t.drag_to(h.point, &p, spacing);
         }
         let dirty = t.take_dirty();
@@ -270,6 +370,112 @@ impl Session {
         let dirty = t.take_dirty();
         let mesh = &self.targets[&id].mesh;
         self.renderer.update_vertices(&id, mesh, &dirty);
+    }
+
+    /// Applies `"clear"`, `"invert"`, or `"blur"` to an object's sculpt mask and updates its GPU shading.
+    pub fn mask_op(&mut self, id: &str, op: &str) -> bool {
+        if !self.objects.iter().any(|o| o.id == id) {
+            return false;
+        }
+        let ok = self.target(id).mask_op(op);
+        if ok {
+            let dirty = self.target(id).take_dirty();
+            let mesh = &self.targets[id].mesh;
+            self.renderer.update_vertices(id, mesh, &dirty);
+        }
+        ok
+    }
+
+    // ---- free voxel / SDF remesh ----
+
+    /// Remeshes object `id` into a uniform-density watertight manifold quad mesh at `resolution`
+    /// (`24..=128` voxels along the longest axis). Pushes to history and returns `(Mesh, setMesh JSON)`.
+    pub fn voxel_remesh(&mut self, id: &str, resolution: u32) -> Result<(Mesh, String), String> {
+        let idx = self.objects.iter().position(|o| o.id == id).ok_or_else(|| format!("unknown object {id}"))?;
+        let (remeshed, cmd) = {
+            let t = self.target(id);
+            let m = voxel_remesh(&t.mesh, &t.bvh, resolution)?;
+            let cmd = set_mesh_command(id, &m);
+            (m, cmd)
+        };
+        let after = Arc::new(remeshed.clone());
+        let before = self.objects[idx].mesh.clone();
+        self.history.push("Voxel Remesh", id, before, after.clone());
+        self.objects[idx].mesh = after.clone();
+        self.target(id).set_mesh(&after);
+        let (w, mat) = (self.objects[idx].world, self.objects[idx].material.clone());
+        let sm = &self.targets[id].mesh;
+        self.renderer.upsert(id, sm, w, &mat);
+        Ok((remeshed, cmd))
+    }
+
+    // ---- Draw in 3D ----
+
+    /// Picks a 3D world point from screen pixel `(x, y)`:
+    /// - If `snap_surface` is true and a scene object is under `(x, y)`, returns the surface hit
+    ///   point offset toward the camera by `surface_offset`.
+    /// - Otherwise intersects the ray with the camera-facing plane at `camera.target() + backward * plane_depth`.
+    pub fn draw3d_pick_point(&mut self, x: f32, y: f32, snap_surface: bool, surface_offset: f32, plane_depth: f32) -> Option<Vec3> {
+        let (o, d) = self.ray(x, y);
+        if snap_surface {
+            if let Some((_, hit_pt)) = self.pick(x, y) {
+                return Some(hit_pt - d * surface_offset);
+            }
+        }
+        let plane_n = self.camera.backward();
+        let plane_p = self.camera.target() + plane_n * plane_depth;
+        let denom = d.dot(plane_n);
+        if denom.abs() < 1e-6 {
+            return None;
+        }
+        let t = (plane_p - o).dot(plane_n) / denom;
+        if t <= 0.0 {
+            return None;
+        }
+        Some(o + d * t)
+    }
+
+    /// Starts an interactive Draw in 3D stroke at screen pixel `(x, y)`. Returns the picked 3D world point.
+    pub fn draw3d_begin(&mut self, x: f32, y: f32, radius: f32, snap_surface: bool, surface_offset: f32, plane_depth: f32) -> Option<Vec3> {
+        let pt = self.draw3d_pick_point(x, y, snap_surface, surface_offset, plane_depth)?;
+        self.drawing3d = Some(Draw3DStroke {
+            points: vec![Draw3DPoint { pos: pt, radius: radius.max(0.2) }],
+            snap_surface,
+            surface_offset,
+            plane_depth,
+        });
+        Some(pt)
+    }
+
+    /// Appends a sampled 3D point during an active Draw in 3D stroke. Returns the picked world point.
+    pub fn draw3d_move(&mut self, x: f32, y: f32, radius: f32) -> Option<Vec3> {
+        let (snap_surface, surface_offset, plane_depth) = {
+            let st = self.drawing3d.as_ref()?;
+            (st.snap_surface, st.surface_offset, st.plane_depth)
+        };
+        let pt = self.draw3d_pick_point(x, y, snap_surface, surface_offset, plane_depth)?;
+        let st = self.drawing3d.as_mut()?;
+        let r = radius.max(0.2);
+        let min_step = (r * 0.25).clamp(0.3, 4.0);
+        if let Some(last) = st.points.last() {
+            if (pt - last.pos).length() < min_step {
+                return None;
+            }
+        }
+        st.points.push(Draw3DPoint { pos: pt, radius: r });
+        Some(pt)
+    }
+
+    /// Ends the Draw in 3D stroke and returns the `SceneCommand.addMesh` JSON string.
+    pub fn draw3d_end(&mut self, options_json: &str) -> Result<String, String> {
+        let st = self.drawing3d.take().ok_or_else(|| "no active Draw in 3D stroke".to_string())?;
+        let (opts, name) = Draw3DOptions::from_json(options_json);
+        let (_, _, cmd) = build_tube_add_mesh_command(&st.points, &opts, &name, None)?;
+        Ok(cmd)
+    }
+
+    pub fn draw3d_cancel(&mut self) {
+        self.drawing3d = None;
     }
 
     // ---- undo ----

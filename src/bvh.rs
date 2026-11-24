@@ -4,7 +4,7 @@
 //! tree tracks `slack`: the largest distance any vertex has moved since the last refit. Queries grow
 //! every box by `slack`, so they stay exact; `refit` runs once the slack is large compared to the brush.
 
-use glam::Vec3;
+use glam::{Vec3, Vec3A};
 
 /// 32 bytes, laid out for upload to the GPU path tracer.
 #[repr(C)]
@@ -37,21 +37,24 @@ const BINS: usize = 12;
 
 #[derive(Clone, Copy)]
 struct Aabb {
-    min: Vec3,
-    max: Vec3,
+    min: Vec3A,
+    max: Vec3A,
 }
 impl Aabb {
-    const EMPTY: Aabb = Aabb { min: Vec3::splat(f32::INFINITY), max: Vec3::splat(f32::NEG_INFINITY) };
-    fn grow(&mut self, p: Vec3) {
+    const EMPTY: Aabb = Aabb { min: Vec3A::splat(f32::INFINITY), max: Vec3A::splat(f32::NEG_INFINITY) };
+    #[inline(always)]
+    fn grow(&mut self, p: Vec3A) {
         self.min = self.min.min(p);
         self.max = self.max.max(p);
     }
+    #[inline(always)]
     fn union(&mut self, b: &Aabb) {
         self.min = self.min.min(b.min);
         self.max = self.max.max(b.max);
     }
+    #[inline(always)]
     fn area(&self) -> f32 {
-        let d = (self.max - self.min).max(Vec3::ZERO);
+        let d = (self.max - self.min).max(Vec3A::ZERO);
         d.x * d.y + d.y * d.z + d.z * d.x
     }
 }
@@ -59,19 +62,19 @@ impl Aabb {
 #[derive(Clone, Copy)]
 struct TriInfo {
     bb: Aabb,
-    cent: Vec3,
+    cent: Vec3A,
 }
 
-#[inline]
+#[inline(always)]
 fn tri_box(p: &[Vec3], t: &[u32; 3]) -> Aabb {
-    let a = p[t[0] as usize];
-    let b = p[t[1] as usize];
-    let c = p[t[2] as usize];
+    let a = Vec3A::from(p[t[0] as usize]);
+    let b = Vec3A::from(p[t[1] as usize]);
+    let c = Vec3A::from(p[t[2] as usize]);
     Aabb { min: a.min(b).min(c), max: a.max(b).max(c) }
 }
 
 #[cfg(feature = "threads")]
-const PARALLEL_BUILD_MIN: usize = 8192;
+const PARALLEL_BUILD_MIN: usize = 4096;
 
 #[inline]
 fn compute_bounds_and_split(ids: &mut [u32], info: &[TriInfo]) -> (Aabb, Option<usize>) {
@@ -277,28 +280,39 @@ impl Bvh {
     pub fn refit(&mut self, positions: &[Vec3], tris: &[[u32; 3]]) {
         for ni in (0..self.nodes.len()).rev() {
             let nd = self.nodes[ni];
-            let mut b = Aabb::EMPTY;
-            if nd.count > 0 {
-                for &t in &self.tri_ids[nd.left_first as usize..(nd.left_first + nd.count) as usize] {
-                    b.union(&tri_box(positions, &tris[t as usize]));
+            let (min, max) = if nd.count > 0 {
+                let mut lo = Vec3A::splat(f32::INFINITY);
+                let mut hi = Vec3A::splat(f32::NEG_INFINITY);
+                let start = nd.left_first as usize;
+                let end = start + nd.count as usize;
+                for &t in &self.tri_ids[start..end] {
+                    let tri = tris[t as usize];
+                    let a = Vec3A::from(positions[tri[0] as usize]);
+                    let b = Vec3A::from(positions[tri[1] as usize]);
+                    let c = Vec3A::from(positions[tri[2] as usize]);
+                    lo = lo.min(a).min(b).min(c);
+                    hi = hi.max(a).max(b).max(c);
                 }
+                (lo, hi)
             } else {
-                for c in [nd.left_first as usize, nd.left_first as usize + 1] {
-                    b.union(&Aabb { min: self.nodes[c].min.into(), max: self.nodes[c].max.into() });
-                }
-            }
-            self.nodes[ni].min = b.min.to_array();
-            self.nodes[ni].max = b.max.to_array();
+                let l = nd.left_first as usize;
+                let r = l + 1;
+                let lo = Vec3A::from_array(self.nodes[l].min).min(Vec3A::from_array(self.nodes[r].min));
+                let hi = Vec3A::from_array(self.nodes[l].max).max(Vec3A::from_array(self.nodes[r].max));
+                (lo, hi)
+            };
+            self.nodes[ni].min = min.to_array();
+            self.nodes[ni].max = max.to_array();
         }
         self.slack = 0.0;
     }
 
     #[inline(always)]
-    fn slab(&self, n: &Node, o: Vec3, inv: Vec3, s: Vec3, tmax: f32) -> Option<f32> {
-        let t0 = (Vec3::from(n.min) - s - o) * inv;
-        let t1 = (Vec3::from(n.max) + s - o) * inv;
-        let lo = t0.min(t1).max_element().max(0.0);
-        let hi = t0.max(t1).min_element().min(tmax);
+    fn slab(n: &Node, inv: Vec3, neg_o_inv: Vec3, s_inv: Vec3, tmax: f32) -> Option<f32> {
+        let t0 = Vec3::from_array(n.min).mul_add(inv, neg_o_inv);
+        let t1 = Vec3::from_array(n.max).mul_add(inv, neg_o_inv);
+        let lo = (t0.min(t1) - s_inv).max_element().max(0.0);
+        let hi = (t0.max(t1) + s_inv).min_element().min(tmax);
         (lo <= hi).then_some(lo)
     }
 
@@ -308,11 +322,12 @@ impl Bvh {
             return None;
         }
         let inv = dir.recip();
-        let s = Vec3::splat(self.slack);
+        let neg_o_inv = -o * inv;
+        let s_inv = Vec3::splat(self.slack) * inv.abs();
         let mut best: Option<Hit> = None;
         let mut tmax = f32::INFINITY;
         let mut stack = LocalStack::new();
-        if self.slab(&self.nodes[0], o, inv, s, tmax).is_some() {
+        if Self::slab(&self.nodes[0], inv, neg_o_inv, s_inv, tmax).is_some() {
             stack.push(0usize);
         }
         while let Some(ni) = stack.pop() {
@@ -331,8 +346,8 @@ impl Bvh {
                 continue;
             }
             let (l, r) = (n.left_first as usize, n.left_first as usize + 1);
-            let dl = self.slab(&self.nodes[l], o, inv, s, tmax);
-            let dr = self.slab(&self.nodes[r], o, inv, s, tmax);
+            let dl = Self::slab(&self.nodes[l], inv, neg_o_inv, s_inv, tmax);
+            let dr = Self::slab(&self.nodes[r], inv, neg_o_inv, s_inv, tmax);
             // Push the farther child first so the nearer one is visited first.
             match (dl, dr) {
                 (Some(a), Some(b)) if a <= b => {
@@ -404,7 +419,7 @@ impl Stamp {
     pub fn resize(&mut self, n: usize) {
         self.marks.resize(n, 0);
     }
-    fn next(&mut self) -> u32 {
+    pub fn next(&mut self) -> u32 {
         self.tag = self.tag.wrapping_add(1);
         if self.tag == 0 {
             self.marks.fill(0);

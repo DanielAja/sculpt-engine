@@ -118,6 +118,7 @@ struct ObjectU {
 pub struct Vertex {
     pub pos: [f32; 3],
     pub nrm: [f32; 3],
+    pub mask: f32,
 }
 
 #[repr(C)]
@@ -198,6 +199,8 @@ pub struct Renderer {
     targets: Option<Targets>,
     /// Re-render the shadow map only when geometry, placement or the light changes.
     shadow_dirty: bool,
+    /// Reusable vertex staging buffer for partial GPU uploads during sculpt strokes.
+    vertex_staging: Vec<Vertex>,
     /// Sub pixel jitter and kernel rotation, for progressive accumulation (E6); zero when interactive.
     pub jitter: [f32; 4],
 }
@@ -275,7 +278,7 @@ impl Renderer {
         let vlayout = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Vertex>() as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32],
         };
         let llayout = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<LineVertex>() as u64,
@@ -461,6 +464,7 @@ impl Renderer {
             objects: Vec::new(),
             targets: None,
             shadow_dirty: true,
+            vertex_staging: Vec::new(),
             jitter: [0.0; 4],
             gpu,
         }
@@ -514,7 +518,16 @@ impl Renderer {
     pub fn upsert(&mut self, id: &str, mesh: &SculptMesh, world: Mat4, material: &Material) {
         let d = &self.gpu.device;
         let (vbuf, ibuf, count) = if mesh.smooth_shading {
-            let v: Vec<Vertex> = mesh.positions.iter().zip(&mesh.normals).map(|(p, n)| Vertex { pos: p.to_array(), nrm: n.to_array() }).collect();
+            let v: Vec<Vertex> = mesh
+                .positions
+                .iter()
+                .enumerate()
+                .map(|(k, p)| Vertex {
+                    pos: p.to_array(),
+                    nrm: mesh.normals[k].to_array(),
+                    mask: mesh.masks.get(k).copied().unwrap_or(0.0),
+                })
+                .collect();
             let idx: Vec<u32> = mesh.tris.iter().flatten().copied().collect();
             (
                 d.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(id), contents: bytemuck::cast_slice(&v), usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST }),
@@ -577,10 +590,17 @@ impl Renderer {
         // `dirty` holds moved vertices and the ring whose normals changed (SculptTarget::take_dirty).
         let (lo, hi) = (*dirty.iter().min().unwrap() as usize, *dirty.iter().max().unwrap() as usize);
         if o.smooth && hi < mesh.positions.len() && (o.vbuf.size() as usize) == mesh.positions.len() * std::mem::size_of::<Vertex>() {
-            // shortcut: uploads the whole min..max index range; split into runs if far apart footprints
-            // (symmetry on meshes with scattered vertex order) make the range large.
-            let v: Vec<Vertex> = (lo..=hi).map(|k| Vertex { pos: mesh.positions[k].to_array(), nrm: mesh.normals[k].to_array() }).collect();
-            self.gpu.queue.write_buffer(&o.vbuf, (lo * std::mem::size_of::<Vertex>()) as u64, bytemuck::cast_slice(&v));
+            // Reuse vertex staging buffer across dabs to eliminate per-dab heap allocations.
+            self.vertex_staging.clear();
+            self.vertex_staging.reserve(hi - lo + 1);
+            for k in lo..=hi {
+                self.vertex_staging.push(Vertex {
+                    pos: mesh.positions[k].to_array(),
+                    nrm: mesh.normals[k].to_array(),
+                    mask: mesh.masks.get(k).copied().unwrap_or(0.0),
+                });
+            }
+            self.gpu.queue.write_buffer(&o.vbuf, (lo * std::mem::size_of::<Vertex>()) as u64, bytemuck::cast_slice(&self.vertex_staging));
         } else {
             // shortcut: flat shaded meshes re-upload every corner; sculpting normally runs on smooth meshes.
             let v = flat_vertices(mesh);
@@ -880,8 +900,12 @@ fn ortho_rh(half: f32, far: f32) -> Mat4 {
 }
 
 fn flat_vertices(mesh: &SculptMesh) -> Vec<Vertex> {
-    let (p, n) = mesh.flat_buffers();
-    p.iter().zip(&n).map(|(p, n)| Vertex { pos: p.to_array(), nrm: n.to_array() }).collect()
+    let (p, n, m) = mesh.flat_buffers_masked();
+    p.iter()
+        .zip(&n)
+        .zip(&m)
+        .map(|((p, n), &mask)| Vertex { pos: p.to_array(), nrm: n.to_array(), mask })
+        .collect()
 }
 
 fn local_bounds(positions: &[Vec3]) -> (Vec3, Vec3) {

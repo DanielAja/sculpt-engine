@@ -154,20 +154,166 @@ impl ProjectFile {
     }
 
     /// Pretty, key sorted JSON, byte identical to Swift's `ProjectFile.encode()`.
+    /// Streams mesh arrays directly to avoid building millions of temporary AST nodes.
     pub fn encode(&self) -> String {
-        J::Obj(vec![
-            ("appVersion", J::Str(self.app_version.clone())),
-            ("createdAt", J::Str(self.created_at.clone())),
-            ("formatVersion", J::Int(self.format_version)),
-            ("modifiedAt", J::Str(self.modified_at.clone())),
-            ("scene", J::Obj(vec![("objects", J::Arr(self.scene.objects.iter().map(object_json).collect()))])),
-            ("selection", selection_json(&self.selection)),
-        ]
-        .into_iter()
-        .chain(self.camera_state.clone().map(|c| ("cameraState", J::Str(c))))
-        .collect())
-        .pretty()
+        let est: usize = 2048
+            + self
+                .scene
+                .objects
+                .iter()
+                .map(|o| o.mesh.positions.len() * 64 + o.mesh.faces.len() * 96 + 512)
+                .sum::<usize>();
+        let mut out = String::with_capacity(est);
+        out.push_str("{\n  \"appVersion\" : ");
+        json::string(&self.app_version, &mut out);
+        if let Some(c) = &self.camera_state {
+            out.push_str(",\n  \"cameraState\" : ");
+            json::string(c, &mut out);
+        }
+        out.push_str(",\n  \"createdAt\" : ");
+        json::string(&self.created_at, &mut out);
+        out.push_str(",\n  \"formatVersion\" : ");
+        json::write_i64(self.format_version, &mut out);
+        out.push_str(",\n  \"modifiedAt\" : ");
+        json::string(&self.modified_at, &mut out);
+        out.push_str(",\n  \"scene\" : {\n    \"objects\" : ");
+        json::container(&mut out, Some(2), '[', ']', self.scene.objects.len(), |out, i, l| {
+            write_object_pretty(&self.scene.objects[i], out, l.unwrap());
+        });
+        out.push_str("\n  },\n  \"selection\" : ");
+        json::write_value(&selection_json(&self.selection), &mut out, Some(1));
+        out.push_str("\n}");
+        out
     }
+}
+
+fn write_mesh_stream(m: &Mesh, out: &mut String, level: Option<usize>) {
+    match level {
+        None => {
+            out.push_str("{\"faces\":[");
+            for (fi, f) in m.faces.iter().enumerate() {
+                if fi > 0 {
+                    out.push(',');
+                }
+                out.push('[');
+                for (ii, &idx) in f.iter().enumerate() {
+                    if ii > 0 {
+                        out.push(',');
+                    }
+                    json::write_u32(idx, out);
+                }
+                out.push(']');
+            }
+            out.push_str("],\"positions\":[");
+            for (pi, p) in m.positions.iter().enumerate() {
+                if pi > 0 {
+                    out.push(',');
+                }
+                json::swift_float(p.x, out);
+                out.push(',');
+                json::swift_float(p.y, out);
+                out.push(',');
+                json::swift_float(p.z, out);
+            }
+            out.push_str("],\"smoothShading\":");
+            out.push_str(if m.smooth_shading { "true}" } else { "false}" });
+        }
+        Some(l) => {
+            out.push_str("{\n");
+            json::indent(out, l + 1);
+            out.push_str("\"faces\" : ");
+            json::container(out, Some(l + 1), '[', ']', m.faces.len(), |out, fi, fl| {
+                let f = &m.faces[fi];
+                let fl = fl.unwrap();
+                json::container(out, Some(fl), '[', ']', f.len(), |out, ii, _| {
+                    json::write_u32(f[ii], out);
+                });
+            });
+            out.push_str(",\n");
+            json::indent(out, l + 1);
+            out.push_str("\"positions\" : [");
+            out.push('\n');
+            let npos = m.positions.len();
+            if npos == 0 {
+                out.push('\n');
+            } else {
+                for (pi, p) in m.positions.iter().enumerate() {
+                    let last_p = pi + 1 == npos;
+                    json::indent(out, l + 2);
+                    json::swift_float(p.x, out);
+                    out.push_str(",\n");
+                    json::indent(out, l + 2);
+                    json::swift_float(p.y, out);
+                    out.push_str(",\n");
+                    json::indent(out, l + 2);
+                    json::swift_float(p.z, out);
+                    out.push_str(if last_p { "\n" } else { ",\n" });
+                }
+            }
+            json::indent(out, l + 1);
+            out.push_str("],\n");
+            json::indent(out, l + 1);
+            out.push_str("\"smoothShading\" : ");
+            out.push_str(if m.smooth_shading { "true\n" } else { "false\n" });
+            json::indent(out, l);
+            out.push('}');
+        }
+    }
+}
+
+fn write_object_pretty(o: &SceneObject, out: &mut String, l: usize) {
+    let t = &o.transform;
+    out.push_str("{\n");
+    // Sorted keys: id, isLocked, isVisible, material, mesh, modifiers, name, [parent], [primitiveKind], transform
+    json::indent(out, l + 1);
+    out.push_str("\"id\" : ");
+    json::write_value(&uuid(&o.id), out, Some(l + 1));
+    out.push_str(",\n");
+    json::indent(out, l + 1);
+    out.push_str("\"isLocked\" : ");
+    out.push_str(if o.is_locked { "true,\n" } else { "false,\n" });
+    json::indent(out, l + 1);
+    out.push_str("\"isVisible\" : ");
+    out.push_str(if o.is_visible { "true,\n" } else { "false,\n" });
+    json::indent(out, l + 1);
+    out.push_str("\"material\" : ");
+    json::write_value(&material_json(&o.material), out, Some(l + 1));
+    out.push_str(",\n");
+    json::indent(out, l + 1);
+    out.push_str("\"mesh\" : ");
+    write_mesh_stream(&o.mesh, out, Some(l + 1));
+    out.push_str(",\n");
+    json::indent(out, l + 1);
+    out.push_str("\"modifiers\" : ");
+    json::write_value(&J::Arr(o.modifiers.iter().map(modifier_json).collect()), out, Some(l + 1));
+    out.push_str(",\n");
+    json::indent(out, l + 1);
+    out.push_str("\"name\" : ");
+    json::string(&o.name, out);
+    if let Some(p) = &o.parent {
+        out.push_str(",\n");
+        json::indent(out, l + 1);
+        out.push_str("\"parent\" : ");
+        json::write_value(&uuid(p), out, Some(l + 1));
+    }
+    if let Some(k) = &o.primitive_kind {
+        out.push_str(",\n");
+        json::indent(out, l + 1);
+        out.push_str("\"primitiveKind\" : ");
+        json::string(k, out);
+    }
+    out.push_str(",\n");
+    json::indent(out, l + 1);
+    out.push_str("\"transform\" : ");
+    let tr = J::Obj(vec![
+        ("position", v3(t.position)),
+        ("rotation", J::Arr(t.rotation.to_array().iter().map(|&x| J::F32(x)).collect())),
+        ("scale", v3(t.scale)),
+    ]);
+    json::write_value(&tr, out, Some(l + 1));
+    out.push('\n');
+    json::indent(out, l);
+    out.push('}');
 }
 
 fn v3(v: Vec3) -> J {
@@ -192,35 +338,35 @@ pub fn mesh_json(m: &Mesh) -> J {
 
 /// `SceneCommand.setMesh(id, mesh)` in Swift's synthesized Codable shape, compact.
 pub fn set_mesh_command(id: &str, mesh: &Mesh) -> String {
-    J::Obj(vec![("setMesh", J::Obj(vec![("_0", uuid(id)), ("_1", mesh_json(mesh))]))]).compact()
+    let mut out = String::with_capacity(128 + mesh.positions.len() * 32 + mesh.faces.len() * 24);
+    out.push_str("{\"setMesh\":{\"_0\":{\"rawValue\":");
+    json::string(id, &mut out);
+    out.push_str("},\"_1\":");
+    write_mesh_stream(mesh, &mut out, None);
+    out.push_str("}}");
+    out
 }
 
-fn object_json(o: &SceneObject) -> J {
-    let t = &o.transform;
-    let mut f = vec![
-        ("id", uuid(&o.id)),
-        ("isLocked", J::Bool(o.is_locked)),
-        ("isVisible", J::Bool(o.is_visible)),
-        ("material", material_json(&o.material)),
-        ("mesh", mesh_json(&o.mesh)),
-        ("modifiers", J::Arr(o.modifiers.iter().map(modifier_json).collect())),
-        ("name", J::Str(o.name.clone())),
-        (
-            "transform",
-            J::Obj(vec![
-                ("position", v3(t.position)),
-                ("rotation", J::Arr(t.rotation.to_array().iter().map(|&x| J::F32(x)).collect())),
-                ("scale", v3(t.scale)),
-            ]),
-        ),
-    ];
-    if let Some(p) = &o.parent {
-        f.push(("parent", uuid(p)));
+/// `SceneCommand.addMesh(mesh, name: name, position: position, material: material)` in Swift's Codable shape.
+pub fn add_mesh_command(mesh: &Mesh, name: &str, position: Vec3, material: Option<&Material>) -> String {
+    let mut out = String::with_capacity(256 + mesh.positions.len() * 32 + mesh.faces.len() * 24);
+    out.push_str("{\"addMesh\":{\"_0\":");
+    write_mesh_stream(mesh, &mut out, None);
+    out.push_str(",\"name\":");
+    json::string(name, &mut out);
+    out.push_str(",\"position\":[");
+    json::swift_float(position.x, &mut out);
+    out.push(',');
+    json::swift_float(position.y, &mut out);
+    out.push(',');
+    json::swift_float(position.z, &mut out);
+    out.push(']');
+    if let Some(m) = material {
+        out.push_str(",\"material\":");
+        json::write_value(&material_json(m), &mut out, None);
     }
-    if let Some(k) = &o.primitive_kind {
-        f.push(("primitiveKind", J::Str(k.clone())));
-    }
-    J::Obj(f)
+    out.push_str("}}");
+    out
 }
 
 fn material_json(m: &Material) -> J {

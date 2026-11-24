@@ -4,9 +4,11 @@
 pub mod brush;
 pub mod bvh;
 pub mod camera;
+pub mod draw3d;
 pub mod format;
-pub mod text3d;
 pub mod mesh;
+pub mod remesh;
+pub mod text3d;
 #[cfg(feature = "render")]
 pub mod render;
 #[cfg(feature = "render")]

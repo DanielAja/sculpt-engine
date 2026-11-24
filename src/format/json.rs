@@ -26,20 +26,66 @@ impl J {
     }
 }
 
-fn indent(out: &mut String, n: usize) {
-    for _ in 0..n {
-        out.push_str("  ");
+use std::fmt::Write as _;
+
+const SPACES: &str = "                                ";
+
+pub(crate) fn indent(out: &mut String, n: usize) {
+    let mut rem = n * 2;
+    while rem > 0 {
+        let chunk = rem.min(SPACES.len());
+        out.push_str(&SPACES[..chunk]);
+        rem -= chunk;
     }
 }
 
-fn write(v: &J, out: &mut String, level: Option<usize>) {
+#[inline]
+pub(crate) fn write_u32(mut v: u32, out: &mut String) {
+    if v == 0 {
+        out.push('0');
+        return;
+    }
+    let mut buf = [0u8; 10];
+    let mut i = buf.len();
+    while v > 0 {
+        i -= 1;
+        buf[i] = b'0' + (v % 10) as u8;
+        v /= 10;
+    }
+    // SAFETY: digits are pure ASCII.
+    out.push_str(unsafe { std::str::from_utf8_unchecked(&buf[i..]) });
+}
+
+#[inline]
+pub(crate) fn write_i64(v: i64, out: &mut String) {
+    if v == 0 {
+        out.push('0');
+        return;
+    }
+    let mut u = v.unsigned_abs();
+    let mut buf = [0u8; 21];
+    let mut i = buf.len();
+    while u > 0 {
+        i -= 1;
+        buf[i] = b'0' + (u % 10) as u8;
+        u /= 10;
+    }
+    if v < 0 {
+        i -= 1;
+        buf[i] = b'-';
+    }
+    // SAFETY: '-' and digits are pure ASCII.
+    out.push_str(unsafe { std::str::from_utf8_unchecked(&buf[i..]) });
+}
+
+pub(crate) fn write_value(v: &J, out: &mut String, level: Option<usize>) {
     match v {
         J::Null => out.push_str("null"),
         J::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
-        J::Int(i) => out.push_str(&i.to_string()),
+        J::Int(i) => write_i64(*i, out),
         J::F32(f) => swift_float(*f, out),
         J::Str(s) => string(s, out),
-        J::Arr(items) => container(out, level, '[', ']', items.len(), |out, i, l| write(&items[i], out, l)),
+        J::Arr(items) => container(out, level, '[', ']', items.len(), |out, i, l| write_value(&items[i], out, l)),
         J::Obj(fields) => {
             let mut sorted: Vec<&(&str, J)> = fields.iter().collect();
             sorted.sort_by(|a, b| a.0.cmp(b.0));
@@ -47,13 +93,17 @@ fn write(v: &J, out: &mut String, level: Option<usize>) {
             container(out, level, '{', '}', sorted.len(), |out, i, l| {
                 string(sorted[i].0, out);
                 out.push_str(sep);
-                write(&sorted[i].1, out, l);
+                write_value(&sorted[i].1, out, l);
             })
         }
     }
 }
 
-fn container(out: &mut String, level: Option<usize>, open: char, close: char, n: usize, mut item: impl FnMut(&mut String, usize, Option<usize>)) {
+fn write(v: &J, out: &mut String, level: Option<usize>) {
+    write_value(v, out, level);
+}
+
+pub(crate) fn container(out: &mut String, level: Option<usize>, open: char, close: char, n: usize, mut item: impl FnMut(&mut String, usize, Option<usize>)) {
     out.push(open);
     match level {
         None => {
@@ -81,26 +131,61 @@ fn container(out: &mut String, level: Option<usize>, open: char, close: char, n:
     out.push(close);
 }
 
-fn string(s: &str, out: &mut String) {
+pub(crate) fn string(s: &str, out: &mut String) {
     out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\u{08}' => out.push_str("\\b"),
-            '\u{0C}' => out.push_str("\\f"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
+    let bytes = s.as_bytes();
+    let mut start = 0;
+    for (i, &b) in bytes.iter().enumerate() {
+        let esc = match b {
+            b'"' => Some("\\\""),
+            b'\\' => Some("\\\\"),
+            b'\n' => Some("\\n"),
+            b'\r' => Some("\\r"),
+            b'\t' => Some("\\t"),
+            0x08 => Some("\\b"),
+            0x0C => Some("\\f"),
+            0..=0x1F => {
+                if start < i {
+                    out.push_str(&s[start..i]);
+                }
+                let _ = write!(out, "\\u{:04x}", b);
+                start = i + 1;
+                continue;
+            }
+            _ => None,
+        };
+        if let Some(e) = esc {
+            if start < i {
+                out.push_str(&s[start..i]);
+            }
+            out.push_str(e);
+            start = i + 1;
         }
+    }
+    if start < s.len() {
+        out.push_str(&s[start..]);
     }
     out.push('"');
 }
 
+struct StackBuf {
+    buf: [u8; 40],
+    len: usize,
+}
+impl std::fmt::Write for StackBuf {
+    #[inline]
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        let b = s.as_bytes();
+        let n = b.len().min(self.buf.len() - self.len);
+        self.buf[self.len..self.len + n].copy_from_slice(&b[..n]);
+        self.len += n;
+        Ok(())
+    }
+}
+
 /// Swift's `Float.description` with a trailing ".0" dropped (what `JSONEncoder` writes):
 /// shortest round trip digits, decimal for 1e-4 <= |x| <= 2^24, otherwise `1.5e-05` / `3e+08`.
+#[inline]
 pub fn swift_float(f: f32, out: &mut String) {
     if f.is_nan() {
         return out.push_str("\"nan\"");
@@ -112,14 +197,50 @@ pub fn swift_float(f: f32, out: &mut String) {
         return out.push_str(if f.is_sign_negative() { "-0" } else { "0" });
     }
     // Rust's `{:e}` is the shortest round trip form too: "1.6777218e7", "-5e-5".
-    let sci = format!("{:e}", f);
-    let (mant, exp) = sci.split_once('e').unwrap();
-    let exp: i32 = exp.parse().unwrap();
-    let (neg, mant) = mant.strip_prefix('-').map_or((false, mant), |m| (true, m));
-    let digits: String = mant.chars().filter(|c| *c != '.').collect();
+    // Formatted into a stack buffer to avoid any per-float heap allocations.
+    let mut sb = StackBuf { buf: [0u8; 40], len: 0 };
+    let _ = write!(sb, "{f:e}");
+    let bytes = &sb.buf[..sb.len];
+    let mut e_pos = 0;
+    while e_pos < bytes.len() && bytes[e_pos] != b'e' {
+        e_pos += 1;
+    }
+    let mut m_start = 0;
+    let neg = if bytes[0] == b'-' {
+        m_start = 1;
+        true
+    } else {
+        false
+    };
+    let mut digits = [0u8; 16];
+    let mut dlen = 0usize;
+    for &b in &bytes[m_start..e_pos] {
+        if b != b'.' {
+            digits[dlen] = b;
+            dlen += 1;
+        }
+    }
+    let mut exp: i32 = 0;
+    let mut exp_neg = false;
+    let mut ei = e_pos + 1;
+    if ei < bytes.len() && bytes[ei] == b'-' {
+        exp_neg = true;
+        ei += 1;
+    } else if ei < bytes.len() && bytes[ei] == b'+' {
+        ei += 1;
+    }
+    while ei < bytes.len() {
+        exp = exp * 10 + (bytes[ei] - b'0') as i32;
+        ei += 1;
+    }
+    if exp_neg {
+        exp = -exp;
+    }
     if neg {
         out.push('-');
     }
+    // SAFETY: `digits[..dlen]` are ASCII digits.
+    let dstr = unsafe { std::str::from_utf8_unchecked(&digits[..dlen]) };
     let a = f.abs();
     if (1e-4..=16_777_216.0).contains(&a) {
         // Decimal: point after (exp + 1) digits.
@@ -129,24 +250,32 @@ pub fn swift_float(f: f32, out: &mut String) {
             for _ in 0..-point {
                 out.push('0');
             }
-            out.push_str(&digits);
-        } else if point as usize >= digits.len() {
-            out.push_str(&digits);
-            for _ in 0..(point as usize - digits.len()) {
+            out.push_str(dstr);
+        } else if point as usize >= dlen {
+            out.push_str(dstr);
+            for _ in 0..(point as usize - dlen) {
                 out.push('0');
             }
         } else {
-            out.push_str(&digits[..point as usize]);
+            out.push_str(&dstr[..point as usize]);
             out.push('.');
-            out.push_str(&digits[point as usize..]);
+            out.push_str(&dstr[point as usize..]);
         }
     } else {
-        out.push_str(&digits[..1]);
-        if digits.len() > 1 {
+        out.push(digits[0] as char);
+        if dlen > 1 {
             out.push('.');
-            out.push_str(&digits[1..]);
+            out.push_str(&dstr[1..]);
         }
-        out.push_str(&format!("e{}{:02}", if exp < 0 { '-' } else { '+' }, exp.abs()));
+        out.push('e');
+        out.push(if exp < 0 { '-' } else { '+' });
+        let ea = exp.unsigned_abs();
+        if ea < 10 {
+            out.push('0');
+            out.push((b'0' + ea as u8) as char);
+        } else {
+            write_u32(ea, out);
+        }
     }
 }
 

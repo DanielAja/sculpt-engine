@@ -88,18 +88,25 @@ pub fn surface_nets(f: &Compiled, grid: &Grid) -> Mesh {
     // Hamann 1991), which depends only on that face's values, so both cells sharing the face agree.
     let (cx, cy, cz) = (nx - 1, ny - 1, nz - 1);
     let cidx = |i: usize, j: usize, k: usize| (k * cy + j) * cx + i;
+    let sy = nx;
+    let sz = nx * ny;
+    let corner_off: [usize; 8] = [0, 1, sy, sy + 1, sz, sz + 1, sz + sy, sz + sy + 1];
     let mut cell_slot = vec![u32::MAX; cx * cy * cz];
     let mut slots: Vec<[u32; 12]> = Vec::new();
     let mut positions: Vec<Vec3> = Vec::new();
     let h2 = h * h;
     for k in 0..cz {
+        let kz = k * sz;
         for j in 0..cy {
+            let base_row = kz + j * sy;
             for i in 0..cx {
+                let b = base_row + i;
                 let mut v = [0f32; 8];
                 let mut mask = 0u8;
-                for (c, o) in CORNERS.iter().enumerate() {
-                    v[c] = field[idx(i + o[0], j + o[1], k + o[2])];
-                    if v[c] < 0.0 {
+                for c in 0..8 {
+                    let val = field[b + corner_off[c]];
+                    v[c] = val;
+                    if val < 0.0 {
                         mask |= 1 << c;
                     }
                 }
@@ -170,8 +177,8 @@ pub fn surface_nets(f: &Compiled, grid: &Grid) -> Mesh {
                         if edge_crosses[e2] && root(&mut comp, e2) == r {
                             let (a, b) = EDGES[e2];
                             let t = v[a] / (v[a] - v[b]);
-                            let pa = Vec3::new(CORNERS[a][0] as f32, CORNERS[a][1] as f32, CORNERS[a][2] as f32);
-                            let pb = Vec3::new(CORNERS[b][0] as f32, CORNERS[b][1] as f32, CORNERS[b][2] as f32);
+                            let pa = CORNERS_F32[a];
+                            let pb = CORNERS_F32[b];
                             sum += pa + (pb - pa) * t;
                             count += 1.0;
                             members[m_len] = e2;
@@ -261,7 +268,16 @@ pub fn surface_nets(f: &Compiled, grid: &Grid) -> Mesh {
     Mesh { positions, faces, smooth_shading: true }
 }
 
-const CORNERS: [[usize; 3]; 8] = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0], [0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1]];
+const CORNERS_F32: [Vec3; 8] = [
+    Vec3::new(0.0, 0.0, 0.0),
+    Vec3::new(1.0, 0.0, 0.0),
+    Vec3::new(0.0, 1.0, 0.0),
+    Vec3::new(1.0, 1.0, 0.0),
+    Vec3::new(0.0, 0.0, 1.0),
+    Vec3::new(1.0, 0.0, 1.0),
+    Vec3::new(0.0, 1.0, 1.0),
+    Vec3::new(1.0, 1.0, 1.0),
+];
 const EDGES: [(usize, usize); 12] = [(0, 1), (2, 3), (4, 5), (6, 7), (0, 2), (1, 3), (4, 6), (5, 7), (0, 4), (1, 5), (2, 6), (3, 7)];
 const EDGE_LOOKUP: [[u8; 8]; 8] = {
     let mut table = [[255u8; 8]; 8];
@@ -421,16 +437,37 @@ pub fn make_manifold(m: &mut Mesh) {
 }
 
 /// Sculptor's watertight test: every directed edge appears once and so does its reverse.
+/// Zero-hash sorted packed-edge check: packs (min, max, dir) into u64 and verifies exact forward/reverse pairing.
 pub fn is_manifold(m: &Mesh) -> bool {
-    let mut e: std::collections::HashMap<(u32, u32), u8> = std::collections::HashMap::with_capacity(m.faces.len() * 4);
+    let total_edges: usize = m.faces.iter().map(|f| f.len()).sum();
+    if total_edges == 0 || total_edges % 2 != 0 {
+        return total_edges == 0;
+    }
+    let mut edges = Vec::with_capacity(total_edges);
     for f in &m.faces {
-        for k in 0..f.len() {
-            let n = e.entry((f[k], f[(k + 1) % f.len()])).or_default();
-            *n += 1;
-            if *n > 1 {
-                return false;
-            }
+        let len = f.len();
+        for k in 0..len {
+            let a = f[k];
+            let b = f[(k + 1) % len];
+            let (lo, hi, dir) = if a < b { (a as u64, b as u64, 0u64) } else { (b as u64, a as u64, 1u64) };
+            // Supports up to 2^31 vertices (2B+ vertices).
+            edges.push((lo << 33) | (hi << 1) | dir);
         }
     }
-    e.keys().all(|(a, b)| e.contains_key(&(*b, *a)))
+    edges.sort_unstable();
+    let mut i = 0;
+    while i < edges.len() {
+        let e0 = edges[i];
+        let e1 = edges[i + 1];
+        // Pair must be same undirected edge (lo, hi) with opposite directions: dir 0 then dir 1.
+        if (e0 & 1) != 0 || e1 != (e0 | 1) {
+            return false;
+        }
+        // Reject non-manifold edges shared by 3+ faces (same undirected edge repeats).
+        if i + 2 < edges.len() && (edges[i + 2] >> 1) == (e0 >> 1) {
+            return false;
+        }
+        i += 2;
+    }
+    true
 }

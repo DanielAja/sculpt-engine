@@ -65,7 +65,7 @@ fn framed(r: &Renderer, aspect: f32) -> OrbitCamera {
 }
 
 fn brush(kind: BrushKind, radius: f32, invert: bool, symmetry: bool) -> BrushParams {
-    BrushParams { kind, radius, strength: if invert { -0.6 } else { 0.6 }, symmetry: [symmetry, false, false] }
+    BrushParams { kind, radius, strength: if invert { -0.6 } else { 0.6 }, symmetry: [symmetry, false, false], ..BrushParams::default() }
 }
 
 fn headless(args: &[String]) {

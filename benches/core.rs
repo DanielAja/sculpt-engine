@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
-use sculpt_engine::brush::{dab, BrushKind, BrushParams, Scratch};
+use sculpt_engine::brush::{dab_and_update_normals, BrushKind, BrushParams, Scratch};
 use sculpt_engine::bvh::Bvh;
 use sculpt_engine::format::{Mesh, ProjectFile, Scene, SceneObject, Selection, Transform, Material};
 use sculpt_engine::glam::Vec3;
@@ -35,15 +35,17 @@ fn benches(c: &mut Criterion) {
     // Footprints: radius 5 on a radius 50 sphere of 1M tris covers ~2.5k verts; radius 20 ~ 40k.
     for (name, radius) in [("small", 5.0f32), ("large", 20.0)] {
         for kind in [BrushKind::Draw, BrushKind::Inflate, BrushKind::Smooth, BrushKind::Flatten] {
-            let p = BrushParams { kind, radius, strength: 0.5, symmetry: [false; 3] };
+            let p = BrushParams { kind, radius, strength: 0.5, symmetry: [false; 3], ..Default::default() };
             c.bench_function(&format!("dab/{kind:?}/{name}").to_lowercase(), |b| {
                 b.iter_batched(
-                    || (s1m.clone(), Scratch::new(s1m.positions.len()), Vec::with_capacity(65536)),
-                    |(mut m, mut s, mut moved)| {
-                        dab(&mut m, &bvh, &mut s, Vec3::new(50.0, 0.0, 0.0), &p, &mut moved);
-                        let vs: Vec<u32> = moved.iter().map(|x| x.0).collect();
-                        m.update_normals(&vs);
-                        (m, s, moved) // dropped outside the timed part
+                    || {
+                        let mut s = Scratch::new(s1m.positions.len());
+                        s.poly_stamp.resize(s1m.poly_count());
+                        (s1m.clone(), s, Vec::with_capacity(65536), Vec::with_capacity(65536))
+                    },
+                    |(mut m, mut s, mut moved, mut dirty)| {
+                        dab_and_update_normals(&mut m, &bvh, &mut s, Vec3::new(50.0, 0.0, 0.0), &p, &mut moved, &mut dirty);
+                        (m, s, moved, dirty) // dropped outside the timed part
                     },
                     BatchSize::LargeInput,
                 )
@@ -67,6 +69,28 @@ fn benches(c: &mut Criterion) {
     g.bench_function("encode_1m", |b| b.iter(|| project.encode().len()));
     g.bench_function("decode_1m", |b| b.iter(|| ProjectFile::decode(text.as_bytes()).unwrap()));
     g.finish();
+
+    let mut t3d = c.benchmark_group("text3d");
+    t3d.sample_size(10);
+    let opts = sculpt_engine::text3d::GenOptions { max_triangles: 8_000, detail: 64, seed: 0, quads: true };
+    t3d.bench_function("cup_8k", |b| b.iter(|| sculpt_engine::text3d::generate("a ceramic coffee cup", &opts).unwrap().triangles()));
+    t3d.bench_function("chair_8k", |b| b.iter(|| sculpt_engine::text3d::generate("a wooden chair", &opts).unwrap().triangles()));
+    t3d.bench_function("scene_cat_table", |b| b.iter(|| sculpt_engine::text3d::generate("a cat on a table", &opts).unwrap().triangles()));
+    t3d.finish();
+
+    #[cfg(feature = "render")]
+    {
+        let mut ibl = c.benchmark_group("ibl");
+        ibl.sample_size(10);
+        ibl.bench_function("prefilter_and_lut", |b| {
+            b.iter(|| {
+                let p = sculpt_engine::render::ibl::prefilter(&sculpt_engine::render::ibl::studio);
+                let l = sculpt_engine::render::ibl::brdf_lut();
+                (p.len(), l.len())
+            })
+        });
+        ibl.finish();
+    }
 }
 
 criterion_group!(core, benches);

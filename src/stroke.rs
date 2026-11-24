@@ -3,11 +3,11 @@
 //! A stroke previews on the working mesh and never enters history until `end_stroke`, which returns the
 //! `SceneCommand.setMesh` JSON the Swift core accepts: one "Sculpt" undo step, as in the web port.
 
-use crate::brush::{self, BrushParams, Scratch};
+use crate::brush::{self, BrushKind, BrushParams, Scratch};
 use crate::bvh::{Bvh, Hit};
 use crate::format::{set_mesh_command, Mesh};
 use crate::mesh::SculptMesh;
-use glam::{Mat4, Vec3};
+use glam::{Mat3, Mat4, Vec3};
 use std::sync::Arc;
 
 /// The object being sculpted: its mesh, BVH and world placement. Lives across strokes so the BVH is
@@ -21,9 +21,20 @@ pub struct SculptTarget {
     /// Average absolute scale: world radius / scale = local radius (as the web port does).
     scale: f32,
     scratch: Scratch,
+    moved_buf: Vec<(u32, Vec3)>,
     stroke: Option<Stroke>,
     /// Vertices changed since the host last asked (`take_dirty`), for partial GPU uploads.
     dirty: Vec<u32>,
+}
+
+struct GrabState {
+    origin_world: Vec3,
+    plane_normal: Vec3,
+    /// Per grabbed vertex: `(vertex_index, initial_local_pos, accumulated_linear_delta_matrix)`.
+    /// New local position = `initial_local_pos + delta_mat * delta_local`.
+    entries: Vec<(u32, Vec3, Mat3)>,
+    verts: Vec<u32>,
+    last_delta_len: f32,
 }
 
 struct Stroke {
@@ -32,12 +43,14 @@ struct Stroke {
     saved: Vec<bool>,
     dabs: usize,
     last: Option<Vec3>,
+    grab: Option<GrabState>,
 }
 
 impl SculptTarget {
     pub fn new(id: impl Into<String>, mesh: &Mesh, world: Mat4) -> SculptTarget {
         let mesh = SculptMesh::from_mesh(mesh);
         let bvh = Bvh::build(&mesh.positions, &mesh.tris);
+        let vlen = mesh.positions.len();
         let (s, _, _) = world.to_scale_rotation_translation();
         SculptTarget {
             id: id.into(),
@@ -46,7 +59,8 @@ impl SculptTarget {
             world,
             world_inverse: world.inverse(),
             scale: ((s.x.abs() + s.y.abs() + s.z.abs()) / 3.0).max(1e-6),
-            scratch: Scratch::default(),
+            scratch: Scratch::new(vlen),
+            moved_buf: Vec::new(),
             stroke: None,
             dirty: Vec::new(),
         }
@@ -60,7 +74,123 @@ impl SculptTarget {
     }
 
     pub fn begin_stroke(&mut self) {
-        self.stroke = Some(Stroke { before: Vec::new(), saved: vec![false; self.mesh.positions.len()], dabs: 0, last: None });
+        self.stroke = Some(Stroke {
+            before: Vec::new(),
+            saved: vec![false; self.mesh.positions.len()],
+            dabs: 0,
+            last: None,
+            grab: None,
+        });
+    }
+
+    /// Starts a Nomad-style Grab stroke at `hit_world` dragging on a plane with normal `plane_normal`.
+    /// Captures all vertices inside the brush footprint (including 3-axis & radial symmetry) with
+    /// their falloff and mask-protected weights.
+    pub fn begin_grab(&mut self, hit_world: Vec3, plane_normal: Vec3, params: &BrushParams) {
+        self.begin_stroke();
+        let Some(st) = &mut self.stroke else { return };
+        let local_center = self.world_inverse.transform_point3(hit_world);
+        let r = (params.radius / self.scale).max(1e-5);
+        let inv_r2 = 1.0 / (r * r);
+        let abs_st = params.strength.abs().clamp(0.0, 1.0);
+        let syms = brush::symmetry_transforms(local_center, r, params.symmetry, params.radial_symmetry);
+
+        let mut stamp = crate::bvh::Stamp::new(self.mesh.positions.len());
+        let mut hits = Vec::new();
+        let mut accum: std::collections::HashMap<u32, (Vec3, Mat3)> = std::collections::HashMap::new();
+        for (sym_c, sym_mat) in syms {
+            self.bvh.sphere_vertices(&self.mesh.positions, &self.mesh.tris, sym_c, r, &mut stamp, &mut hits);
+            for &v in &hits {
+                let pos = self.mesh.positions[v as usize];
+                let d2 = (pos - sym_c).length_squared();
+                let f = params.falloff.eval(d2, inv_r2);
+                let mask_unprotected = (1.0 - self.mesh.masks.get(v as usize).copied().unwrap_or(0.0)).clamp(0.0, 1.0);
+                let w = f * mask_unprotected * abs_st;
+                if w > 1e-6 {
+                    let entry = accum.entry(v).or_insert((pos, Mat3::ZERO));
+                    entry.1 += sym_mat * w;
+                }
+            }
+        }
+        let mut entries: Vec<(u32, Vec3, Mat3)> = accum.into_iter().map(|(v, (p, m))| (v, p, m)).collect();
+        entries.sort_unstable_by_key(|e| e.0);
+        let mut verts = Vec::with_capacity(entries.len());
+        for &(v, p, _) in &entries {
+            st.saved[v as usize] = true;
+            st.before.push((v, p));
+            verts.push(v);
+        }
+        st.grab = Some(GrabState {
+            origin_world: hit_world,
+            plane_normal: plane_normal.normalize_or_zero(),
+            entries,
+            verts,
+            last_delta_len: 0.0,
+        });
+    }
+
+    pub fn is_grabbing(&self) -> bool {
+        self.stroke.as_ref().is_some_and(|s| s.grab.is_some())
+    }
+
+    /// Moves a Grab stroke by intersecting the ray `(origin, dir)` with the grab drag plane.
+    pub fn drag_grab_ray(&mut self, origin: Vec3, dir: Vec3) {
+        let Some((p0, pn)) = self.stroke.as_ref().and_then(|s| s.grab.as_ref()).map(|g| (g.origin_world, g.plane_normal)) else {
+            return;
+        };
+        let denom = dir.dot(pn);
+        if denom.abs() < 1e-6 {
+            return;
+        }
+        let t = (p0 - origin).dot(pn) / denom;
+        if t <= 0.0 {
+            return;
+        }
+        let cur_world = origin + dir * t;
+        self.move_grab(cur_world - p0);
+    }
+
+    /// Translates the grabbed vertices by `delta_world` (in world mm).
+    pub fn move_grab(&mut self, delta_world: Vec3) {
+        let Some(st) = &mut self.stroke else { return };
+        let Some(grab) = &mut st.grab else { return };
+        if grab.entries.is_empty() {
+            return;
+        }
+        let delta_local = self.world_inverse.transform_vector3(delta_world);
+        let mut max_step = 0.0f32;
+        for &(v, init_pos, mat) in &grab.entries {
+            let np = init_pos + mat * delta_local;
+            let prev = self.mesh.positions[v as usize];
+            max_step = max_step.max((np - prev).length_squared());
+            self.mesh.positions[v as usize] = np;
+        }
+        st.dabs += 1;
+        let step_len = max_step.sqrt();
+        grab.last_delta_len += step_len;
+        self.mesh.update_normals_stamped(
+            &grab.verts,
+            &mut self.scratch.poly_stamp,
+            &mut self.scratch.vert_stamp,
+            &mut self.dirty,
+        );
+        self.bvh.slack += step_len;
+        if self.bvh.slack > 2.0 {
+            self.bvh.refit(&self.mesh.positions, &self.mesh.tris);
+        }
+    }
+
+    /// Applies a mask operation (`"clear"`, `"invert"`, `"blur"`) and marks all vertices dirty so the
+    /// renderer refreshes vertex mask shading.
+    pub fn mask_op(&mut self, op: &str) -> bool {
+        match op {
+            "clear" => self.mesh.mask_clear(),
+            "invert" => self.mesh.mask_invert(),
+            "blur" => self.mesh.mask_blur(),
+            _ => return false,
+        }
+        self.dirty.extend(0..self.mesh.positions.len() as u32);
+        true
     }
 
     pub fn in_stroke(&self) -> bool {
@@ -89,22 +219,29 @@ impl SculptTarget {
         let Some(st) = &mut self.stroke else { return };
         let local = self.world_inverse.transform_point3(p);
         let lp = BrushParams { radius: params.radius / self.scale, ..*params };
-        let mut moved = Vec::new();
-        let moved_by = brush::dab(&mut self.mesh, &self.bvh, &mut self.scratch, local, &lp, &mut moved);
+        self.moved_buf.clear();
+        let moved_by = brush::dab_and_update_normals(
+            &mut self.mesh,
+            &self.bvh,
+            &mut self.scratch,
+            local,
+            &lp,
+            &mut self.moved_buf,
+            &mut self.dirty,
+        );
+        if params.kind == BrushKind::Mask {
+            st.dabs += 1;
+            st.last = Some(p);
+            return;
+        }
         st.dabs += 1;
         st.last = Some(p);
-        let mut vs = Vec::with_capacity(moved.len());
-        for (v, old) in moved {
+        for &(v, old) in &self.moved_buf {
             if !st.saved[v as usize] {
                 st.saved[v as usize] = true;
                 st.before.push((v, old));
             }
-            vs.push(v);
         }
-        vs.sort_unstable();
-        vs.dedup();
-        let changed = self.mesh.update_normals(&vs);
-        self.dirty.extend_from_slice(&changed);
         // Keep queries exact without a refit; refit once vertices have drifted a quarter radius.
         self.bvh.slack += moved_by;
         if self.bvh.slack > lp.radius * 0.25 {
@@ -227,7 +364,7 @@ mod tests {
     use crate::mesh::uv_sphere;
 
     fn draw() -> BrushParams {
-        BrushParams { kind: BrushKind::Draw, radius: 4.0, strength: 1.0, symmetry: [false; 3] }
+        BrushParams { kind: BrushKind::Draw, radius: 4.0, strength: 1.0, ..Default::default() }
     }
 
     #[test]
@@ -277,5 +414,35 @@ mod tests {
         assert!(Arc::ptr_eq(&h.redo().unwrap().1, &a));
         h.push("New", "X", a.clone(), a.clone());
         assert!(h.redo().is_none(), "a new step clears redo");
+    }
+
+    #[test]
+    fn grab_translates_captured_footprint_with_symmetry_and_cancel() {
+        let sphere = uv_sphere(10.0, 32, 16);
+        let mut t = SculptTarget::new("ID", &sphere, Mat4::IDENTITY);
+        let p = BrushParams {
+            kind: BrushKind::Grab,
+            radius: 4.0,
+            strength: 1.0,
+            symmetry: [true, false, false],
+            ..Default::default()
+        };
+        t.begin_grab(Vec3::new(10.0, 0.0, 0.0), Vec3::NEG_Y, &p);
+        assert!(t.is_grabbing());
+        t.move_grab(Vec3::new(3.0, 0.0, 2.0));
+        // Pole near +X should move outward along +X and +Z; mirror near -X should move outward along -X and +Z!
+        let max_x = t.mesh.positions.iter().map(|q| q.x).fold(f32::NEG_INFINITY, f32::max);
+        let min_x = t.mesh.positions.iter().map(|q| q.x).fold(f32::INFINITY, f32::min);
+        assert!(max_x > 12.0, "grab +X should pull outward: {max_x}");
+        assert!(min_x < -12.0, "mirrored grab -X should pull outward: {min_x}");
+        t.cancel_stroke();
+        assert_eq!(t.mesh.positions, sphere.positions);
+
+        // Now test committing grab stroke.
+        t.begin_grab(Vec3::new(10.0, 0.0, 0.0), Vec3::NEG_Y, &p);
+        t.move_grab(Vec3::new(2.0, 0.0, 0.0));
+        let (mesh, cmd) = t.end_stroke().unwrap();
+        assert!(mesh.positions != sphere.positions);
+        assert!(cmd.contains("\"setMesh\""));
     }
 }

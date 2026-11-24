@@ -38,6 +38,7 @@ struct Object {
 struct VIn {
     @location(0) pos: vec3f,
     @location(1) nrm: vec3f,
+    @location(2) mask: f32,
 }
 
 const PI: f32 = 3.14159265;
@@ -93,6 +94,7 @@ struct VOut {
     @builtin(position) clip: vec4f,
     @location(0) world: vec3f,
     @location(1) n: vec3f,
+    @location(2) mask: f32,
 }
 
 @vertex
@@ -101,6 +103,7 @@ fn vs_main(v: VIn) -> VOut {
     let world = O.model * vec4f(v.pos, 1.0);
     o.world = world.xyz;
     o.n = (O.normal_mat * vec4f(v.nrm, 0.0)).xyz;
+    o.mask = v.mask;
     o.clip = jittered(F.view_proj * world);
     return o;
 }
@@ -163,7 +166,7 @@ fn fs_main(i: VOut, @builtin(front_facing) front: bool) -> @location(0) vec4f {
     let v = normalize(F.cam_pos.xyz - i.world);
     let l = normalize(F.light_dir.xyz);
     let h = normalize(v + l);
-    let base = O.base_color.rgb;
+    let base = O.base_color.rgb * mix(1.0, 0.32, clamp(i.mask, 0.0, 1.0));
     let metal = O.mr.x;
     let rough = clamp(O.mr.y, 0.045, 1.0);
     let a = rough * rough;

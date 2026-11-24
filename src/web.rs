@@ -118,13 +118,84 @@ impl WebEngine {
         self.session.camera = self.session.camera.zoom(factor);
     }
 
-    /// Brush kind ("draw", "inflate", "smooth", "flatten"), world radius in mm, strength -1 to 1, X symmetry.
+    /// Brush kind ("draw", "clay", "inflate", "crease", "pinch", "grab", "smooth", "flatten", "mask"),
+    /// world radius in mm, strength -1 to 1, X symmetry (backwards compatible).
     #[wasm_bindgen(js_name = setBrush)]
     pub fn set_brush(&mut self, kind: &str, radius: f32, strength: f32, symmetry_x: bool) {
-        self.session.brush.kind = crate::brush::BrushKind::parse(kind);
-        self.session.brush.radius = radius.max(0.1);
-        self.session.brush.strength = strength.clamp(-1.0, 1.0);
-        self.session.brush.symmetry = [symmetry_x, false, false];
+        self.session.set_brush_ex(kind, radius, strength, "smooth", symmetry_x, false, false, 1);
+    }
+
+    /// Extended Nomad-grade brush settings: kind, world radius in mm, strength -1..1, falloff
+    /// ("smooth" | "linear" | "sharp" | "constant"), 3-axis symmetry, and radial symmetry (1..16).
+    #[wasm_bindgen(js_name = setBrushEx)]
+    pub fn set_brush_ex(
+        &mut self,
+        kind: &str,
+        radius: f32,
+        strength: f32,
+        falloff: &str,
+        sym_x: bool,
+        sym_y: bool,
+        sym_z: bool,
+        radial_count: u32,
+    ) {
+        self.session.set_brush_ex(kind, radius, strength, falloff, sym_x, sym_y, sym_z, radial_count);
+    }
+
+    /// Mask operation on object `id`: `"clear"`, `"invert"`, or `"blur"`.
+    #[wasm_bindgen(js_name = maskOp)]
+    pub fn mask_op(&mut self, id: &str, op: &str) -> bool {
+        self.session.mask_op(id, op)
+    }
+
+    /// Free Voxel / SDF Remesh: returns `SceneCommand.setMesh` JSON for object `id` at `resolution` (24..128).
+    #[wasm_bindgen(js_name = voxelRemesh)]
+    pub fn voxel_remesh(&mut self, id: &str, resolution: u32) -> Result<String, JsValue> {
+        self.session.voxel_remesh(id, resolution).map(|(_, cmd)| cmd).map_err(err)
+    }
+
+    /// Interactive Draw in 3D: picks a 3D world point from screen pixel `(x, y)` (empty if none).
+    #[wasm_bindgen(js_name = draw3dPickPoint)]
+    pub fn draw3d_pick_point(&mut self, x: f32, y: f32, snap_surface: bool, surface_offset: f32, plane_depth: f32) -> Vec<f32> {
+        self.session
+            .draw3d_pick_point(x, y, snap_surface, surface_offset, plane_depth)
+            .map(|p| vec![p.x, p.y, p.z])
+            .unwrap_or_default()
+    }
+
+    /// Interactive Draw in 3D: begins a stroke at `(x, y)` and returns `[x, y, z]` world point.
+    #[wasm_bindgen(js_name = draw3dBegin)]
+    pub fn draw3d_begin(&mut self, x: f32, y: f32, radius: f32, snap_surface: bool, surface_offset: f32, plane_depth: f32) -> Vec<f32> {
+        self.session
+            .draw3d_begin(x, y, radius, snap_surface, surface_offset, plane_depth)
+            .map(|p| vec![p.x, p.y, p.z])
+            .unwrap_or_default()
+    }
+
+    /// Interactive Draw in 3D: appends a sample at `(x, y)` and returns `[x, y, z]` if added.
+    #[wasm_bindgen(js_name = draw3dMove)]
+    pub fn draw3d_move(&mut self, x: f32, y: f32, radius: f32) -> Vec<f32> {
+        self.session
+            .draw3d_move(x, y, radius)
+            .map(|p| vec![p.x, p.y, p.z])
+            .unwrap_or_default()
+    }
+
+    /// Interactive Draw in 3D: finishes the stroke and returns `SceneCommand.addMesh` JSON.
+    #[wasm_bindgen(js_name = draw3dEnd)]
+    pub fn draw3d_end(&mut self, options_json: &str) -> Result<String, JsValue> {
+        self.session.draw3d_end(options_json).map_err(err)
+    }
+
+    #[wasm_bindgen(js_name = draw3dCancel)]
+    pub fn draw3d_cancel(&mut self) {
+        self.session.draw3d_cancel();
+    }
+
+    /// Sets the viewport background color in sRGB `[0..1]`.
+    #[wasm_bindgen(js_name = setBackground)]
+    pub fn set_background(&mut self, r: f32, g: f32, b: f32) {
+        self.session.renderer.settings.background = [r.clamp(0.0, 1.0), g.clamp(0.0, 1.0), b.clamp(0.0, 1.0)];
     }
 
     /// Picked object id under a point, if any.
@@ -174,6 +245,32 @@ impl WebEngine {
     pub fn upsert_object(&mut self, id: &str, mesh_json: &str, world: &[f32], color: &[f32], metallic: f32, roughness: f32) -> Result<(), JsValue> {
         let o = crate::session::object_from_parts(id, mesh_json, world, color, metallic, roughness).map_err(err)?;
         self.session.upsert_object(o);
+        Ok(())
+    }
+    /// Zero-JSON binary mesh upload (E4.5).
+    #[wasm_bindgen(js_name = upsertObjectBuffers)]
+    pub fn upsert_object_buffers(
+        &mut self,
+        id: &str,
+        positions: &[f32],
+        face_sizes: &[u32],
+        face_indices: &[u32],
+        smooth_shading: bool,
+        world: &[f32],
+        color: &[f32],
+        metallic: f32,
+        roughness: f32,
+    ) -> Result<(), JsValue> {
+        let o = crate::session::object_from_buffers(id, positions, face_sizes, face_indices, smooth_shading, world, color, metallic, roughness)
+            .map_err(err)?;
+        self.session.upsert_object(o);
+        Ok(())
+    }
+    /// Zero-JSON binary mesh replacement (E4.5).
+    #[wasm_bindgen(js_name = setMeshBuffers)]
+    pub fn set_mesh_buffers(&mut self, id: &str, positions: &[f32], face_sizes: &[u32], face_indices: &[u32], smooth_shading: bool) -> Result<(), JsValue> {
+        let m = crate::session::mesh_from_buffers(positions, face_sizes, face_indices, smooth_shading).map_err(err)?;
+        self.session.set_mesh(id, m);
         Ok(())
     }
     #[wasm_bindgen(js_name = removeObject)]
@@ -288,4 +385,21 @@ pub fn program_prompt() -> String {
 #[wasm_bindgen(js_name = programSchema)]
 pub fn program_schema() -> String {
     crate::text3d::host::program_schema()
+}
+
+/// Draw in 3D free function (no GPU needed): builds a watertight tube/ribbon `SceneCommand.addMesh`
+/// JSON from flat `[x, y, z, radius, ...]` samples and options JSON.
+#[wasm_bindgen(js_name = draw3dFromPoints)]
+pub fn draw3d_from_points(points_xyzr: &[f32], options_json: &str) -> Result<String, JsValue> {
+    if points_xyzr.len() < 8 || points_xyzr.len() % 4 != 0 {
+        return Err(err("points_xyzr must contain at least 2 (x, y, z, radius) quadruples"));
+    }
+    let pts: Vec<crate::draw3d::Draw3DPoint> = points_xyzr
+        .chunks_exact(4)
+        .map(|c| crate::draw3d::Draw3DPoint { pos: Vec3::new(c[0], c[1], c[2]), radius: c[3] })
+        .collect();
+    let (opts, name) = crate::draw3d::Draw3DOptions::from_json(options_json);
+    crate::draw3d::build_tube_add_mesh_command(&pts, &opts, &name, None)
+        .map(|(_, _, cmd)| cmd)
+        .map_err(err)
 }

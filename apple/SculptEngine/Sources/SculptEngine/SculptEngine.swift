@@ -607,12 +607,30 @@ public protocol EngineViewProtocol: AnyObject, Sendable {
     
     func cameraJson()  -> String
     
+    func draw3dBegin(x: Float, y: Float, radius: Float, snapSurface: Bool, surfaceOffset: Float, planeDepth: Float)  -> [Float]
+    
+    func draw3dCancel() 
+    
+    func draw3dEnd(optionsJson: String) throws  -> String
+    
+    func draw3dMove(x: Float, y: Float, radius: Float)  -> [Float]
+    
+    /**
+     * Interactive Draw in 3D: picks a world point from screen pixel `(x, y)` (empty if none).
+     */
+    func draw3dPickPoint(x: Float, y: Float, snapSurface: Bool, surfaceOffset: Float, planeDepth: Float)  -> [Float]
+    
     func frameAll() 
     
     /**
      * The object and world point under a screen point (pixels).
      */
     func hit(x: Float, y: Float)  -> Hit?
+    
+    /**
+     * Mask operation on object `id`: "clear", "invert", or "blur".
+     */
+    func maskOp(id: String, op: String)  -> Bool
     
     func openProject(bytes: Data) throws 
     
@@ -655,9 +673,20 @@ public protocol EngineViewProtocol: AnyObject, Sendable {
     func sculptMove(x: Float, y: Float, pressure: Float) 
     
     /**
-     * kind: "draw", "inflate", "smooth", "flatten"; radius in world mm; strength -1 to 1.
+     * Sets viewport background sRGB `[0..1]`.
+     */
+    func setBackground(r: Float, g: Float, b: Float) 
+    
+    /**
+     * kind: "draw", "clay", "inflate", "crease", "pinch", "grab", "smooth", "flatten", "mask";
+     * radius in world mm; strength -1 to 1.
      */
     func setBrush(kind: String, radius: Float, strength: Float, symmetryX: Bool) 
+    
+    /**
+     * Extended Nomad-grade brush settings with falloff, 3-axis symmetry, and radial symmetry (1..16).
+     */
+    func setBrushEx(kind: String, radius: Float, strength: Float, falloff: String, symX: Bool, symY: Bool, symZ: Bool, radialCount: UInt32) 
     
     func setCameraJson(json: String) throws 
     
@@ -669,6 +698,11 @@ public protocol EngineViewProtocol: AnyObject, Sendable {
     func setLook(tonemap: String, ssao: Bool, shadows: Bool) 
     
     func setMaterial(id: String, color: [Float], metallic: Float, roughness: Float) throws 
+    
+    /**
+     * Zero-JSON binary mesh replacement for an existing object (E4.5).
+     */
+    func setMeshBuffers(id: String, positions: [Float], faceSizes: [UInt32], faceIndices: [UInt32], smoothShading: Bool) throws 
     
     func setTransform(id: String, world: [Float]) throws 
     
@@ -686,6 +720,16 @@ public protocol EngineViewProtocol: AnyObject, Sendable {
      * major world matrix (16 floats, millimetres, Z up), sRGB colour (4 floats), metallic, roughness.
      */
     func upsertObject(id: String, meshJson: String, world: [Float], color: [Float], metallic: Float, roughness: Float) throws 
+    
+    /**
+     * Zero-JSON binary mesh upload (E4.5): flat xyz `positions`, per-face vertex counts `face_sizes`, and `face_indices`.
+     */
+    func upsertObjectBuffers(id: String, positions: [Float], faceSizes: [UInt32], faceIndices: [UInt32], smoothShading: Bool, world: [Float], color: [Float], metallic: Float, roughness: Float) throws 
+    
+    /**
+     * Free Voxel / SDF Remesh: returns `SceneCommand.setMesh` JSON for object `id` at `resolution` (24..128).
+     */
+    func voxelRemesh(id: String, resolution: UInt32) throws  -> String
     
     func zoom(factor: Float) 
     
@@ -802,6 +846,68 @@ open func cameraJson() -> String  {
 })
 }
     
+open func draw3dBegin(x: Float, y: Float, radius: Float, snapSurface: Bool, surfaceOffset: Float, planeDepth: Float) -> [Float]  {
+    return try!  FfiConverterSequenceFloat.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_method_engineview_draw3d_begin(
+            self.uniffiCloneHandle(),
+        FfiConverterFloat.lower(x),
+        FfiConverterFloat.lower(y),
+        FfiConverterFloat.lower(radius),
+        FfiConverterBool.lower(snapSurface),
+        FfiConverterFloat.lower(surfaceOffset),
+        FfiConverterFloat.lower(planeDepth),uniffiCallStatus
+    )
+})
+}
+    
+open func draw3dCancel()  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_method_engineview_draw3d_cancel(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+}
+}
+    
+open func draw3dEnd(optionsJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_method_engineview_draw3d_end(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(optionsJson),uniffiCallStatus
+    )
+})
+}
+    
+open func draw3dMove(x: Float, y: Float, radius: Float) -> [Float]  {
+    return try!  FfiConverterSequenceFloat.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_method_engineview_draw3d_move(
+            self.uniffiCloneHandle(),
+        FfiConverterFloat.lower(x),
+        FfiConverterFloat.lower(y),
+        FfiConverterFloat.lower(radius),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * Interactive Draw in 3D: picks a world point from screen pixel `(x, y)` (empty if none).
+     */
+open func draw3dPickPoint(x: Float, y: Float, snapSurface: Bool, surfaceOffset: Float, planeDepth: Float) -> [Float]  {
+    return try!  FfiConverterSequenceFloat.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_method_engineview_draw3d_pick_point(
+            self.uniffiCloneHandle(),
+        FfiConverterFloat.lower(x),
+        FfiConverterFloat.lower(y),
+        FfiConverterBool.lower(snapSurface),
+        FfiConverterFloat.lower(surfaceOffset),
+        FfiConverterFloat.lower(planeDepth),uniffiCallStatus
+    )
+})
+}
+    
 open func frameAll()  {try! rustCall() {
         uniffiCallStatus in
     uniffi_sculpt_engine_fn_method_engineview_frame_all(
@@ -820,6 +926,20 @@ open func hit(x: Float, y: Float) -> Hit?  {
             self.uniffiCloneHandle(),
         FfiConverterFloat.lower(x),
         FfiConverterFloat.lower(y),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * Mask operation on object `id`: "clear", "invert", or "blur".
+     */
+open func maskOp(id: String, op: String) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_method_engineview_mask_op(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),
+        FfiConverterString.lower(op),uniffiCallStatus
     )
 })
 }
@@ -974,7 +1094,22 @@ open func sculptMove(x: Float, y: Float, pressure: Float)  {try! rustCall() {
 }
     
     /**
-     * kind: "draw", "inflate", "smooth", "flatten"; radius in world mm; strength -1 to 1.
+     * Sets viewport background sRGB `[0..1]`.
+     */
+open func setBackground(r: Float, g: Float, b: Float)  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_method_engineview_set_background(
+            self.uniffiCloneHandle(),
+        FfiConverterFloat.lower(r),
+        FfiConverterFloat.lower(g),
+        FfiConverterFloat.lower(b),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * kind: "draw", "clay", "inflate", "crease", "pinch", "grab", "smooth", "flatten", "mask";
+     * radius in world mm; strength -1 to 1.
      */
 open func setBrush(kind: String, radius: Float, strength: Float, symmetryX: Bool)  {try! rustCall() {
         uniffiCallStatus in
@@ -984,6 +1119,25 @@ open func setBrush(kind: String, radius: Float, strength: Float, symmetryX: Bool
         FfiConverterFloat.lower(radius),
         FfiConverterFloat.lower(strength),
         FfiConverterBool.lower(symmetryX),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * Extended Nomad-grade brush settings with falloff, 3-axis symmetry, and radial symmetry (1..16).
+     */
+open func setBrushEx(kind: String, radius: Float, strength: Float, falloff: String, symX: Bool, symY: Bool, symZ: Bool, radialCount: UInt32)  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_method_engineview_set_brush_ex(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(kind),
+        FfiConverterFloat.lower(radius),
+        FfiConverterFloat.lower(strength),
+        FfiConverterString.lower(falloff),
+        FfiConverterBool.lower(symX),
+        FfiConverterBool.lower(symY),
+        FfiConverterBool.lower(symZ),
+        FfiConverterUInt32.lower(radialCount),uniffiCallStatus
     )
 }
 }
@@ -1029,6 +1183,22 @@ open func setMaterial(id: String, color: [Float], metallic: Float, roughness: Fl
         FfiConverterSequenceFloat.lower(color),
         FfiConverterFloat.lower(metallic),
         FfiConverterFloat.lower(roughness),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * Zero-JSON binary mesh replacement for an existing object (E4.5).
+     */
+open func setMeshBuffers(id: String, positions: [Float], faceSizes: [UInt32], faceIndices: [UInt32], smoothShading: Bool)throws   {try rustCallWithError(FfiConverterTypeEngineError_lift) {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_method_engineview_set_mesh_buffers(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),
+        FfiConverterSequenceFloat.lower(positions),
+        FfiConverterSequenceUInt32.lower(faceSizes),
+        FfiConverterSequenceUInt32.lower(faceIndices),
+        FfiConverterBool.lower(smoothShading),uniffiCallStatus
     )
 }
 }
@@ -1092,6 +1262,40 @@ open func upsertObject(id: String, meshJson: String, world: [Float], color: [Flo
         FfiConverterFloat.lower(roughness),uniffiCallStatus
     )
 }
+}
+    
+    /**
+     * Zero-JSON binary mesh upload (E4.5): flat xyz `positions`, per-face vertex counts `face_sizes`, and `face_indices`.
+     */
+open func upsertObjectBuffers(id: String, positions: [Float], faceSizes: [UInt32], faceIndices: [UInt32], smoothShading: Bool, world: [Float], color: [Float], metallic: Float, roughness: Float)throws   {try rustCallWithError(FfiConverterTypeEngineError_lift) {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_method_engineview_upsert_object_buffers(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),
+        FfiConverterSequenceFloat.lower(positions),
+        FfiConverterSequenceUInt32.lower(faceSizes),
+        FfiConverterSequenceUInt32.lower(faceIndices),
+        FfiConverterBool.lower(smoothShading),
+        FfiConverterSequenceFloat.lower(world),
+        FfiConverterSequenceFloat.lower(color),
+        FfiConverterFloat.lower(metallic),
+        FfiConverterFloat.lower(roughness),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * Free Voxel / SDF Remesh: returns `SceneCommand.setMesh` JSON for object `id` at `resolution` (24..128).
+     */
+open func voxelRemesh(id: String, resolution: UInt32)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_method_engineview_voxel_remesh(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),
+        FfiConverterUInt32.lower(resolution),uniffiCallStatus
+    )
+})
 }
     
 open func zoom(factor: Float)  {try! rustCall() {
@@ -1510,6 +1714,19 @@ fileprivate struct FfiConverterSequenceTypeSnapshotObject: FfiConverterRustBuffe
     }
 }
 /**
+ * Draw in 3D free function: builds a watertight tube/ribbon `SceneCommand.addMesh` JSON from
+ * flat `[x, y, z, radius, ...]` samples and options JSON.
+ */
+public func draw3dFromPoints(pointsXyzr: [Float], optionsJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_func_draw3d_from_points(
+        FfiConverterSequenceFloat.lower(pointsXyzr),
+        FfiConverterString.lower(optionsJson),uniffiCallStatus
+    )
+})
+}
+/**
  * Meshes a shape program, or an LLM reply containing one (Apple Foundation Models, a local model).
  */
 public func meshProgram(programOrReply: String, optionsJson: String) -> String  {
@@ -1518,6 +1735,18 @@ public func meshProgram(programOrReply: String, optionsJson: String) -> String  
     uniffi_sculpt_engine_fn_func_mesh_program(
         FfiConverterString.lower(programOrReply),
         FfiConverterString.lower(optionsJson),uniffiCallStatus
+    )
+})
+}
+/**
+ * Plans `prompt` without meshing (`{ok, understood, notes, program}`).
+ */
+public func planText(prompt: String, seed: UInt32) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_func_plan_text(
+        FfiConverterString.lower(prompt),
+        FfiConverterUInt32.lower(seed),uniffiCallStatus
     )
 })
 }
@@ -1580,7 +1809,13 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
+    if (uniffi_sculpt_engine_checksum_func_draw3d_from_points() != 6254) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_sculpt_engine_checksum_func_mesh_program() != 47970) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_func_plan_text() != 23715) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sculpt_engine_checksum_func_program_prompt() != 41239) {
@@ -1601,10 +1836,28 @@ private let initializationResult: InitializationResult = {
     if (uniffi_sculpt_engine_checksum_method_engineview_camera_json() != 24731) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_sculpt_engine_checksum_method_engineview_draw3d_begin() != 661) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_method_engineview_draw3d_cancel() != 11566) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_method_engineview_draw3d_end() != 35288) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_method_engineview_draw3d_move() != 17215) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_method_engineview_draw3d_pick_point() != 11611) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_sculpt_engine_checksum_method_engineview_frame_all() != 43017) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sculpt_engine_checksum_method_engineview_hit() != 33277) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_method_engineview_mask_op() != 41610) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sculpt_engine_checksum_method_engineview_open_project() != 18312) {
@@ -1649,7 +1902,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_sculpt_engine_checksum_method_engineview_sculpt_move() != 23685) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_sculpt_engine_checksum_method_engineview_set_brush() != 57179) {
+    if (uniffi_sculpt_engine_checksum_method_engineview_set_background() != 47342) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_method_engineview_set_brush() != 11247) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_method_engineview_set_brush_ex() != 25207) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sculpt_engine_checksum_method_engineview_set_camera_json() != 49447) {
@@ -1662,6 +1921,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sculpt_engine_checksum_method_engineview_set_material() != 6023) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_method_engineview_set_mesh_buffers() != 50701) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sculpt_engine_checksum_method_engineview_set_transform() != 47374) {
@@ -1677,6 +1939,12 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sculpt_engine_checksum_method_engineview_upsert_object() != 26137) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_method_engineview_upsert_object_buffers() != 33255) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_method_engineview_voxel_remesh() != 65360) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sculpt_engine_checksum_method_engineview_zoom() != 5990) {

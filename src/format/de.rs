@@ -38,7 +38,47 @@ impl<'de> Deserialize<'de> for Fl {
     }
 }
 
-/// One element of `positions`: a scalar (flat form) or an `[x, y, z]` triple (older nested form).
+/// Streams `positions` directly into `Vec<Vec3>` (accepts both flat `[x, y, z, ...]` and nested `[[x, y, z], ...]`).
+struct PositionsDe(Vec<Vec3>);
+impl<'de> Deserialize<'de> for PositionsDe {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<PositionsDe, D::Error> {
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = PositionsDe;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a sequence of numbers or [x, y, z] triples")
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, mut s: A) -> Result<PositionsDe, A::Error> {
+                let mut out = Vec::with_capacity(s.size_hint().unwrap_or(0));
+                let Some(first) = s.next_element::<PosElem>()? else {
+                    return Ok(PositionsDe(out));
+                };
+                match first {
+                    PosElem::Scalar(x) => {
+                        let y = s.next_element::<Fl>()?.ok_or_else(|| de::Error::custom("odd position count"))?.0;
+                        let z = s.next_element::<Fl>()?.ok_or_else(|| de::Error::custom("odd position count"))?.0;
+                        out.push(Vec3::new(x, y, z));
+                        while let Some(x) = s.next_element::<Fl>()? {
+                            let y = s.next_element::<Fl>()?.ok_or_else(|| de::Error::custom("odd position count"))?.0;
+                            let z = s.next_element::<Fl>()?.ok_or_else(|| de::Error::custom("odd position count"))?.0;
+                            out.push(Vec3::new(x.0, y, z));
+                        }
+                    }
+                    PosElem::Triple(t) => {
+                        out.push(Vec3::from_array(t));
+                        while let Some(t) = s.next_element::<[Fl; 3]>()? {
+                            out.push(Vec3::new(t[0].0, t[1].0, t[2].0));
+                        }
+                    }
+                }
+                Ok(PositionsDe(out))
+            }
+        }
+        d.deserialize_seq(V)
+    }
+}
+
+/// One element of `positions`: used only to sniff flat vs nested on element 0.
 enum PosElem {
     Scalar(f32),
     Triple([f32; 3]),
@@ -180,6 +220,7 @@ struct Header {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ProjectDe {
+    format_version: i64,
     scene: SceneDe,
     selection: SelectionDe,
     camera_state: Option<String>,
@@ -229,7 +270,7 @@ enum PrimitiveKind {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MeshDe {
-    positions: Vec<PosElem>,
+    positions: PositionsDe,
     faces: Vec<FaceDe>,
     smooth_shading: Option<bool>,
 }
@@ -345,14 +386,29 @@ fn sorted_unique<T: Ord>(mut v: Vec<T>) -> Vec<T> {
 }
 
 pub(super) fn decode(bytes: &[u8]) -> Result<ProjectFile, FormatError> {
-    let header: Header = serde_json::from_slice(bytes).map_err(|_| FormatError::NotAProject)?;
-    if header.format_version > CURRENT_FORMAT_VERSION {
-        return Err(FormatError::NewerVersion(header.format_version));
-    }
-    if header.format_version != CURRENT_FORMAT_VERSION {
-        return Err(FormatError::UnsupportedVersion(header.format_version));
-    }
-    let p: ProjectDe = serde_json::from_slice(bytes).map_err(|_| FormatError::NotAProject)?;
+    // Single-pass parse for valid projects; fall back to header check only on error so newer/older
+    // format versions still report the exact version error even if their schema changed.
+    let p: ProjectDe = match serde_json::from_slice::<ProjectDe>(bytes) {
+        Ok(p) => {
+            if p.format_version > CURRENT_FORMAT_VERSION {
+                return Err(FormatError::NewerVersion(p.format_version));
+            }
+            if p.format_version != CURRENT_FORMAT_VERSION {
+                return Err(FormatError::UnsupportedVersion(p.format_version));
+            }
+            p
+        }
+        Err(_) => {
+            let header: Header = serde_json::from_slice(bytes).map_err(|_| FormatError::NotAProject)?;
+            if header.format_version > CURRENT_FORMAT_VERSION {
+                return Err(FormatError::NewerVersion(header.format_version));
+            }
+            if header.format_version != CURRENT_FORMAT_VERSION {
+                return Err(FormatError::UnsupportedVersion(header.format_version));
+            }
+            return Err(FormatError::NotAProject);
+        }
+    };
     let mut objects = Vec::with_capacity(p.scene.objects.len());
     for o in p.scene.objects {
         objects.push(SceneObject {
@@ -432,51 +488,34 @@ fn entry(e: EntryDe) -> Result<ModifierEntry, FormatError> {
     Ok(ModifierEntry { id: uuid_str(&e.id)?, modifier, is_enabled: e.is_enabled })
 }
 
-/// Swift's `Mesh(from:)` plus `ProjectFile.repaired(_ mesh:)`.
-fn mesh(m: MeshDe) -> Result<Mesh, FormatError> {
-    let mut positions = Vec::new();
-    match m.positions.first() {
-        None => {}
-        Some(PosElem::Scalar(_)) => {
-            if m.positions.len() % 3 != 0 {
-                return Err(FormatError::NotAProject);
-            }
-            let mut flat = Vec::with_capacity(m.positions.len());
-            for e in &m.positions {
-                match e {
-                    PosElem::Scalar(f) => flat.push(*f),
-                    PosElem::Triple(_) => return Err(FormatError::NotAProject),
-                }
-            }
-            positions = flat.chunks_exact(3).map(|c| Vec3::new(c[0], c[1], c[2])).collect();
-        }
-        Some(PosElem::Triple(_)) => {
-            for e in &m.positions {
-                match e {
-                    PosElem::Triple(t) => positions.push(Vec3::from_array(*t)),
-                    PosElem::Scalar(_) => return Err(FormatError::NotAProject),
-                }
-            }
+#[inline]
+fn face_indices_unique(f: &[i64]) -> bool {
+    match f.len() {
+        3 => f[0] != f[1] && f[1] != f[2] && f[0] != f[2],
+        4 => f[0] != f[1] && f[0] != f[2] && f[0] != f[3] && f[1] != f[2] && f[1] != f[3] && f[2] != f[3],
+        _ => {
+            let mut s = f.to_vec();
+            s.sort_unstable();
+            s.windows(2).all(|w| w[0] != w[1])
         }
     }
+}
+
+/// Swift's `Mesh(from:)` plus `ProjectFile.repaired(_ mesh:)`.
+fn mesh(m: MeshDe) -> Result<Mesh, FormatError> {
+    let mut positions = m.positions.0;
     for p in &mut positions {
         if !p.is_finite() {
             *p = Vec3::ZERO;
         }
     }
     let n = positions.len() as i64;
-    let faces = m
-        .faces
-        .into_iter()
-        .filter(|f| {
-            let f = &f.0;
-            f.len() >= 3 && f.iter().all(|&i| i >= 0 && i < n) && {
-                let mut s = f.clone();
-                s.sort_unstable();
-                s.windows(2).all(|w| w[0] != w[1])
-            }
-        })
-        .map(|f| f.0.into_iter().map(|i| i as u32).collect())
-        .collect();
+    let mut faces = Vec::with_capacity(m.faces.len());
+    for f in m.faces {
+        let idx = &f.0;
+        if idx.len() >= 3 && idx.iter().all(|&i| i >= 0 && i < n) && face_indices_unique(idx) {
+            faces.push(idx.iter().map(|&i| i as u32).collect());
+        }
+    }
     Ok(Mesh { positions, faces, smooth_shading: m.smooth_shading.unwrap_or(false) })
 }
