@@ -677,6 +677,116 @@ internal object IntegrityCheckingUniffiLib {
     internal fun ensureInitialized() = Unit
     external fun uniffi_sculpt_engine_checksum_func_compact_to_splat(
     ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_apply(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_apply_group(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_apply_off_main(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_bounds_json(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_box_select(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_bridge_version(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_can_drag(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_cancel_command(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_clear_preview(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_command_progress(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_commit_if_unchanged(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_commit_import(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_core_version(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_deselect_all(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_edit_overlay(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_export_files(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_export_stl(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_fix_plan(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_free(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_free_held(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_free_snapshot(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_gizmo_command(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_import_limits(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_import_load(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_import_prepare(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_new(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_new_command_control(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_new_import_job(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_open_project(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_open_project_data(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_pick(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_preview(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_print_check(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_project_data(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_project_json(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_redo(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_reencode_project(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_render_list_json(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_render_mesh(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_reset(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_run_tool(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_select_all(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_select_linked(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_select_no_elements(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_select_object(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_set_edit_mode(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_set_selection(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_set_undo_budget(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_snapshot(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_snapshot_revision(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_state_json(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_summary_json(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_tap_element(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_undo(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_doc_voice_call(
+    ): Int
     external fun uniffi_sculpt_engine_checksum_func_draw3d_from_points(
     ): Int
     external fun uniffi_sculpt_engine_checksum_func_edit_splat_prompt(
@@ -714,6 +824,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_sculpt_engine_checksum_func_splat_to_ply(
     ): Int
     external fun uniffi_sculpt_engine_checksum_func_text_to_3d(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_voice_call(
     ): Int
     external fun uniffi_sculpt_engine_checksum_method_engineview_backend(
     ): Int
@@ -913,6 +1025,116 @@ internal object UniffiLib {
     ): Unit
     external fun uniffi_sculpt_engine_fn_func_compact_to_splat(`compactBytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_apply(`handle`: Long,`commandJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_apply_group(`handle`: Long,`json`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_apply_off_main(`snapshot`: Long,`commandJson`: RustBuffer.ByValue,`control`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_sculpt_engine_fn_func_doc_bounds_json(`handle`: Long,`idsJson`: RustBuffer.ByValue,`elements`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_box_select(`handle`: Long,`cameraJson`: RustBuffer.ByValue,`x0`: Float,`y0`: Float,`x1`: Float,`y1`: Float,`extend`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_bridge_version(uniffi_out_err: UniffiRustCallStatus, 
+    ): Int
+    external fun uniffi_sculpt_engine_fn_func_doc_can_drag(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_cancel_command(`control`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_sculpt_engine_fn_func_doc_clear_preview(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_sculpt_engine_fn_func_doc_command_progress(`control`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Double
+    external fun uniffi_sculpt_engine_fn_func_doc_commit_if_unchanged(`handle`: Long,`result`: Long,`startRevision`: Int,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_commit_import(`handle`: Long,`prepared`: Long,`asNewDocument`: Byte,`label`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_core_version(uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_deselect_all(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_sculpt_engine_fn_func_doc_edit_overlay(`handle`: Long,`dotRadius`: Float,`dark`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_export_files(`snapshot`: Long,`optionsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_export_stl(`snapshot`: Long,`objectsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_fix_plan(`snapshot`: Long,`optionsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_free(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_sculpt_engine_fn_func_doc_free_held(`id`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_sculpt_engine_fn_func_doc_free_snapshot(`snapshot`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_sculpt_engine_fn_func_doc_gizmo_command(`handle`: Long,`json`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_import_limits(`physicalMemory`: Long,`availableMemory`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_import_load(`job`: Long,`fileName`: RustBuffer.ByValue,`bytes`: RustBuffer.ByValue,`physicalMemory`: Long,`availableMemory`: Long,`defaultName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_import_prepare(`job`: Long,`loaded`: Long,`target`: Int,`defaultName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_new(uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_sculpt_engine_fn_func_doc_new_command_control(uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_sculpt_engine_fn_func_doc_new_import_job(uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_sculpt_engine_fn_func_doc_open_project(`handle`: Long,`json`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_open_project_data(`handle`: Long,`bytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_pick(`handle`: Long,`ox`: Float,`oy`: Float,`oz`: Float,`dx`: Float,`dy`: Float,`dz`: Float,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_preview(`handle`: Long,`commandJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_print_check(`snapshot`: Long,`optionsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_project_data(`handle`: Long,`cameraJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_project_json(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_redo(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    external fun uniffi_sculpt_engine_fn_func_doc_reencode_project(`bytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_render_list_json(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_render_mesh(`handle`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_reset(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_sculpt_engine_fn_func_doc_run_tool(`handle`: Long,`tool`: RustBuffer.ByValue,`optionsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_select_all(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_sculpt_engine_fn_func_doc_select_linked(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_select_no_elements(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_sculpt_engine_fn_func_doc_select_object(`handle`: Long,`id`: RustBuffer.ByValue,`extend`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_sculpt_engine_fn_func_doc_set_edit_mode(`handle`: Long,`mode`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_set_selection(`handle`: Long,`idsJson`: RustBuffer.ByValue,`active`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_sculpt_engine_fn_func_doc_set_undo_budget(`handle`: Long,`bytes`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_sculpt_engine_fn_func_doc_snapshot(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_sculpt_engine_fn_func_doc_snapshot_revision(`snapshot`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Int
+    external fun uniffi_sculpt_engine_fn_func_doc_state_json(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_summary_json(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_tap_element(`handle`: Long,`cameraJson`: RustBuffer.ByValue,`x`: Float,`y`: Float,`density`: Float,`extend`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_doc_undo(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    external fun uniffi_sculpt_engine_fn_func_doc_voice_call(`handle`: Long,`name`: RustBuffer.ByValue,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_sculpt_engine_fn_func_draw3d_from_points(`pointsXyzr`: RustBuffer.ByValue,`optionsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_sculpt_engine_fn_func_edit_splat_prompt(`splatBytes`: RustBuffer.ByValue,`prompt`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -950,6 +1172,8 @@ internal object UniffiLib {
     external fun uniffi_sculpt_engine_fn_func_splat_to_ply(`splatBytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_sculpt_engine_fn_func_text_to_3d(`prompt`: RustBuffer.ByValue,`optionsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_voice_call(`name`: RustBuffer.ByValue,`argsJson`: RustBuffer.ByValue,`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun ffi_sculpt_engine_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -1073,6 +1297,171 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_sculpt_engine_checksum_func_compact_to_splat() and 0xFFFF) != 23341) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_apply() and 0xFFFF) != 36821) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_apply_group() and 0xFFFF) != 29423) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_apply_off_main() and 0xFFFF) != 31813) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_bounds_json() and 0xFFFF) != 27733) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_box_select() and 0xFFFF) != 3431) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_bridge_version() and 0xFFFF) != 32704) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_can_drag() and 0xFFFF) != 22511) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_cancel_command() and 0xFFFF) != 47336) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_clear_preview() and 0xFFFF) != 40837) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_command_progress() and 0xFFFF) != 58481) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_commit_if_unchanged() and 0xFFFF) != 377) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_commit_import() and 0xFFFF) != 11915) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_core_version() and 0xFFFF) != 23971) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_deselect_all() and 0xFFFF) != 57769) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_edit_overlay() and 0xFFFF) != 57316) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_export_files() and 0xFFFF) != 22773) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_export_stl() and 0xFFFF) != 53753) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_fix_plan() and 0xFFFF) != 49899) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_free() and 0xFFFF) != 9677) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_free_held() and 0xFFFF) != 19986) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_free_snapshot() and 0xFFFF) != 45207) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_gizmo_command() and 0xFFFF) != 12595) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_import_limits() and 0xFFFF) != 15135) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_import_load() and 0xFFFF) != 21311) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_import_prepare() and 0xFFFF) != 60369) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_new() and 0xFFFF) != 38939) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_new_command_control() and 0xFFFF) != 5646) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_new_import_job() and 0xFFFF) != 4162) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_open_project() and 0xFFFF) != 43754) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_open_project_data() and 0xFFFF) != 59780) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_pick() and 0xFFFF) != 742) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_preview() and 0xFFFF) != 10693) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_print_check() and 0xFFFF) != 50889) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_project_data() and 0xFFFF) != 56118) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_project_json() and 0xFFFF) != 2462) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_redo() and 0xFFFF) != 44408) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_reencode_project() and 0xFFFF) != 34045) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_render_list_json() and 0xFFFF) != 54721) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_render_mesh() and 0xFFFF) != 24738) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_reset() and 0xFFFF) != 24706) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_run_tool() and 0xFFFF) != 50032) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_select_all() and 0xFFFF) != 61269) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_select_linked() and 0xFFFF) != 58056) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_select_no_elements() and 0xFFFF) != 48961) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_select_object() and 0xFFFF) != 62596) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_set_edit_mode() and 0xFFFF) != 46979) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_set_selection() and 0xFFFF) != 36024) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_set_undo_budget() and 0xFFFF) != 23605) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_snapshot() and 0xFFFF) != 49026) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_snapshot_revision() and 0xFFFF) != 14722) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_state_json() and 0xFFFF) != 54905) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_summary_json() and 0xFFFF) != 57286) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_tap_element() and 0xFFFF) != 2887) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_undo() and 0xFFFF) != 58796) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_doc_voice_call() and 0xFFFF) != 57447) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_sculpt_engine_checksum_func_draw3d_from_points() and 0xFFFF) != 6254) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1128,6 +1517,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_sculpt_engine_checksum_func_text_to_3d() and 0xFFFF) != 32481) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_voice_call() and 0xFFFF) != 8771) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_sculpt_engine_checksum_method_engineview_backend() and 0xFFFF) != 44879) {
@@ -1442,6 +1834,29 @@ public object FfiConverterUInt: FfiConverter<UInt, Int> {
 /**
  * @suppress
  */
+public object FfiConverterInt: FfiConverter<Int, Int> {
+    override fun lift(value: Int): Int {
+        return value
+    }
+
+    override fun read(buf: ByteBuffer): Int {
+        return buf.getInt()
+    }
+
+    override fun lower(value: Int): Int {
+        return value
+    }
+
+    override fun allocationSize(value: Int) = 4UL
+
+    override fun write(value: Int, buf: ByteBuffer) {
+        buf.putInt(value)
+    }
+}
+
+/**
+ * @suppress
+ */
 public object FfiConverterULong: FfiConverter<ULong, Long> {
     override fun lift(value: Long): ULong {
         return value.toULong()
@@ -1465,6 +1880,29 @@ public object FfiConverterULong: FfiConverter<ULong, Long> {
 /**
  * @suppress
  */
+public object FfiConverterLong: FfiConverter<Long, Long> {
+    override fun lift(value: Long): Long {
+        return value
+    }
+
+    override fun read(buf: ByteBuffer): Long {
+        return buf.getLong()
+    }
+
+    override fun lower(value: Long): Long {
+        return value
+    }
+
+    override fun allocationSize(value: Long) = 8UL
+
+    override fun write(value: Long, buf: ByteBuffer) {
+        buf.putLong(value)
+    }
+}
+
+/**
+ * @suppress
+ */
 public object FfiConverterFloat: FfiConverter<Float, Float> {
     override fun lift(value: Float): Float {
         return value
@@ -1482,6 +1920,29 @@ public object FfiConverterFloat: FfiConverter<Float, Float> {
 
     override fun write(value: Float, buf: ByteBuffer) {
         buf.putFloat(value)
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterDouble: FfiConverter<Double, Double> {
+    override fun lift(value: Double): Double {
+        return value
+    }
+
+    override fun read(buf: ByteBuffer): Double {
+        return buf.getDouble()
+    }
+
+    override fun lower(value: Double): Double {
+        return value
+    }
+
+    override fun allocationSize(value: Double) = 8UL
+
+    override fun write(value: Double, buf: ByteBuffer) {
+        buf.putDouble(value)
     }
 }
 
@@ -2655,6 +3116,185 @@ public object FfiConverterTypeEngineView: FfiConverter<EngineView, Long> {
 
 
 
+data class BridgeExportFile (
+    var `fileName`: kotlin.String
+    , 
+    var `data`: kotlin.ByteArray
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeBridgeExportFile: FfiConverterRustBuffer<BridgeExportFile> {
+    override fun read(buf: ByteBuffer): BridgeExportFile {
+        return BridgeExportFile(
+            FfiConverterString.read(buf),
+            FfiConverterByteArray.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: BridgeExportFile) = (
+            FfiConverterString.allocationSize(value.`fileName`) +
+            FfiConverterByteArray.allocationSize(value.`data`)
+    )
+
+    override fun write(value: BridgeExportFile, buf: ByteBuffer) {
+            FfiConverterString.write(value.`fileName`, buf)
+            FfiConverterByteArray.write(value.`data`, buf)
+    }
+}
+
+
+
+data class BridgeOverlayData (
+    var `revision`: kotlin.Int
+    , 
+    var `matrix`: List<kotlin.Float>
+    , 
+    var `linePositions`: List<kotlin.Float>
+    , 
+    var `lineColors`: List<kotlin.Float>
+    , 
+    var `lineIndices`: List<kotlin.UInt>
+    , 
+    var `dotPositions`: List<kotlin.Float>
+    , 
+    var `dotColors`: List<kotlin.Float>
+    , 
+    var `dotIndices`: List<kotlin.UInt>
+    , 
+    var `facePositions`: List<kotlin.Float>
+    , 
+    var `faceColors`: List<kotlin.Float>
+    , 
+    var `faceIndices`: List<kotlin.UInt>
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeBridgeOverlayData: FfiConverterRustBuffer<BridgeOverlayData> {
+    override fun read(buf: ByteBuffer): BridgeOverlayData {
+        return BridgeOverlayData(
+            FfiConverterInt.read(buf),
+            FfiConverterSequenceFloat.read(buf),
+            FfiConverterSequenceFloat.read(buf),
+            FfiConverterSequenceFloat.read(buf),
+            FfiConverterSequenceUInt.read(buf),
+            FfiConverterSequenceFloat.read(buf),
+            FfiConverterSequenceFloat.read(buf),
+            FfiConverterSequenceUInt.read(buf),
+            FfiConverterSequenceFloat.read(buf),
+            FfiConverterSequenceFloat.read(buf),
+            FfiConverterSequenceUInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: BridgeOverlayData) = (
+            FfiConverterInt.allocationSize(value.`revision`) +
+            FfiConverterSequenceFloat.allocationSize(value.`matrix`) +
+            FfiConverterSequenceFloat.allocationSize(value.`linePositions`) +
+            FfiConverterSequenceFloat.allocationSize(value.`lineColors`) +
+            FfiConverterSequenceUInt.allocationSize(value.`lineIndices`) +
+            FfiConverterSequenceFloat.allocationSize(value.`dotPositions`) +
+            FfiConverterSequenceFloat.allocationSize(value.`dotColors`) +
+            FfiConverterSequenceUInt.allocationSize(value.`dotIndices`) +
+            FfiConverterSequenceFloat.allocationSize(value.`facePositions`) +
+            FfiConverterSequenceFloat.allocationSize(value.`faceColors`) +
+            FfiConverterSequenceUInt.allocationSize(value.`faceIndices`)
+    )
+
+    override fun write(value: BridgeOverlayData, buf: ByteBuffer) {
+            FfiConverterInt.write(value.`revision`, buf)
+            FfiConverterSequenceFloat.write(value.`matrix`, buf)
+            FfiConverterSequenceFloat.write(value.`linePositions`, buf)
+            FfiConverterSequenceFloat.write(value.`lineColors`, buf)
+            FfiConverterSequenceUInt.write(value.`lineIndices`, buf)
+            FfiConverterSequenceFloat.write(value.`dotPositions`, buf)
+            FfiConverterSequenceFloat.write(value.`dotColors`, buf)
+            FfiConverterSequenceUInt.write(value.`dotIndices`, buf)
+            FfiConverterSequenceFloat.write(value.`facePositions`, buf)
+            FfiConverterSequenceFloat.write(value.`faceColors`, buf)
+            FfiConverterSequenceUInt.write(value.`faceIndices`, buf)
+    }
+}
+
+
+
+data class BridgeRenderMesh (
+    var `positions`: List<kotlin.Float>
+    , 
+    var `normals`: List<kotlin.Float>
+    , 
+    var `indices`: List<kotlin.UInt>
+    , 
+    var `hullPositions`: List<kotlin.Float>
+    , 
+    var `hullNormals`: List<kotlin.Float>
+    , 
+    var `hullIndices`: List<kotlin.UInt>
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeBridgeRenderMesh: FfiConverterRustBuffer<BridgeRenderMesh> {
+    override fun read(buf: ByteBuffer): BridgeRenderMesh {
+        return BridgeRenderMesh(
+            FfiConverterSequenceFloat.read(buf),
+            FfiConverterSequenceFloat.read(buf),
+            FfiConverterSequenceUInt.read(buf),
+            FfiConverterSequenceFloat.read(buf),
+            FfiConverterSequenceFloat.read(buf),
+            FfiConverterSequenceUInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: BridgeRenderMesh) = (
+            FfiConverterSequenceFloat.allocationSize(value.`positions`) +
+            FfiConverterSequenceFloat.allocationSize(value.`normals`) +
+            FfiConverterSequenceUInt.allocationSize(value.`indices`) +
+            FfiConverterSequenceFloat.allocationSize(value.`hullPositions`) +
+            FfiConverterSequenceFloat.allocationSize(value.`hullNormals`) +
+            FfiConverterSequenceUInt.allocationSize(value.`hullIndices`)
+    )
+
+    override fun write(value: BridgeRenderMesh, buf: ByteBuffer) {
+            FfiConverterSequenceFloat.write(value.`positions`, buf)
+            FfiConverterSequenceFloat.write(value.`normals`, buf)
+            FfiConverterSequenceUInt.write(value.`indices`, buf)
+            FfiConverterSequenceFloat.write(value.`hullPositions`, buf)
+            FfiConverterSequenceFloat.write(value.`hullNormals`, buf)
+            FfiConverterSequenceUInt.write(value.`hullIndices`, buf)
+    }
+}
+
+
+
 data class Hit (
     var `id`: kotlin.String
     , 
@@ -2959,6 +3599,70 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeBridgeOverlayData: FfiConverterRustBuffer<BridgeOverlayData?> {
+    override fun read(buf: ByteBuffer): BridgeOverlayData? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeBridgeOverlayData.read(buf)
+    }
+
+    override fun allocationSize(value: BridgeOverlayData?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeBridgeOverlayData.allocationSize(value)
+        }
+    }
+
+    override fun write(value: BridgeOverlayData?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeBridgeOverlayData.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeBridgeRenderMesh: FfiConverterRustBuffer<BridgeRenderMesh?> {
+    override fun read(buf: ByteBuffer): BridgeRenderMesh? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeBridgeRenderMesh.read(buf)
+    }
+
+    override fun allocationSize(value: BridgeRenderMesh?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeBridgeRenderMesh.allocationSize(value)
+        }
+    }
+
+    override fun write(value: BridgeRenderMesh?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeBridgeRenderMesh.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalTypeHit: FfiConverterRustBuffer<Hit?> {
     override fun read(buf: ByteBuffer): Hit? {
         if (buf.get().toInt() == 0) {
@@ -3047,6 +3751,34 @@ public object FfiConverterSequenceFloat: FfiConverterRustBuffer<List<kotlin.Floa
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeBridgeExportFile: FfiConverterRustBuffer<List<BridgeExportFile>> {
+    override fun read(buf: ByteBuffer): List<BridgeExportFile> {
+        val len = buf.getInt()
+        return List<BridgeExportFile>(len) {
+            FfiConverterTypeBridgeExportFile.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<BridgeExportFile>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeBridgeExportFile.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<BridgeExportFile>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeBridgeExportFile.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeSnapshotObject: FfiConverterRustBuffer<List<SnapshotObject>> {
     override fun read(buf: ByteBuffer): List<SnapshotObject> {
         val len = buf.getInt()
@@ -3078,6 +3810,658 @@ public object FfiConverterSequenceTypeSnapshotObject: FfiConverterRustBuffer<Lis
     
         
         FfiConverterByteArray.lower(`compactBytes`),_status)
+}
+    )
+    }
+    
+ fun `docApply`(`handle`: kotlin.Long, `commandJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_apply(
+    
+        
+        FfiConverterLong.lower(`handle`),
+        FfiConverterString.lower(`commandJson`),_status)
+}
+    )
+    }
+    
+ fun `docApplyGroup`(`handle`: kotlin.Long, `json`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_apply_group(
+    
+        
+        FfiConverterLong.lower(`handle`),
+        FfiConverterString.lower(`json`),_status)
+}
+    )
+    }
+    
+
+    @Throws(EngineException::class) fun `docApplyOffMain`(`snapshot`: kotlin.Long, `commandJson`: kotlin.String, `control`: kotlin.Long): kotlin.Long {
+            return FfiConverterLong.lift(
+    uniffiRustCallWithError(EngineException) { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_apply_off_main(
+    
+        
+        FfiConverterLong.lower(`snapshot`),
+        FfiConverterString.lower(`commandJson`),
+        FfiConverterLong.lower(`control`),_status)
+}
+    )
+    }
+    
+ fun `docBoundsJson`(`handle`: kotlin.Long, `idsJson`: kotlin.String, `elements`: kotlin.Boolean): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_bounds_json(
+    
+        
+        FfiConverterLong.lower(`handle`),
+        FfiConverterString.lower(`idsJson`),
+        FfiConverterBoolean.lower(`elements`),_status)
+}
+    )
+    }
+    
+ fun `docBoxSelect`(`handle`: kotlin.Long, `cameraJson`: kotlin.String, `x0`: kotlin.Float, `y0`: kotlin.Float, `x1`: kotlin.Float, `y1`: kotlin.Float, `extend`: kotlin.Boolean): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_box_select(
+    
+        
+        FfiConverterLong.lower(`handle`),
+        FfiConverterString.lower(`cameraJson`),
+        FfiConverterFloat.lower(`x0`),
+        FfiConverterFloat.lower(`y0`),
+        FfiConverterFloat.lower(`x1`),
+        FfiConverterFloat.lower(`y1`),
+        FfiConverterBoolean.lower(`extend`),_status)
+}
+    )
+    }
+    
+ fun `docBridgeVersion`(): kotlin.Int {
+            return FfiConverterInt.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_bridge_version(
+    
+        _status)
+}
+    )
+    }
+    
+ fun `docCanDrag`(`handle`: kotlin.Long): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_can_drag(
+    
+        
+        FfiConverterLong.lower(`handle`),_status)
+}
+    )
+    }
+    
+ fun `docCancelCommand`(`control`: kotlin.Long)
+        = 
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_cancel_command(
+    
+        
+        FfiConverterLong.lower(`control`),_status)
+}
+    
+    
+ fun `docClearPreview`(`handle`: kotlin.Long)
+        = 
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_clear_preview(
+    
+        
+        FfiConverterLong.lower(`handle`),_status)
+}
+    
+    
+ fun `docCommandProgress`(`control`: kotlin.Long): kotlin.Double {
+            return FfiConverterDouble.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_command_progress(
+    
+        
+        FfiConverterLong.lower(`control`),_status)
+}
+    )
+    }
+    
+ fun `docCommitIfUnchanged`(`handle`: kotlin.Long, `result`: kotlin.Long, `startRevision`: kotlin.Int): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_commit_if_unchanged(
+    
+        
+        FfiConverterLong.lower(`handle`),
+        FfiConverterLong.lower(`result`),
+        FfiConverterInt.lower(`startRevision`),_status)
+}
+    )
+    }
+    
+ fun `docCommitImport`(`handle`: kotlin.Long, `prepared`: kotlin.Long, `asNewDocument`: kotlin.Boolean, `label`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_commit_import(
+    
+        
+        FfiConverterLong.lower(`handle`),
+        FfiConverterLong.lower(`prepared`),
+        FfiConverterBoolean.lower(`asNewDocument`),
+        FfiConverterString.lower(`label`),_status)
+}
+    )
+    }
+    
+ fun `docCoreVersion`(): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_core_version(
+    
+        _status)
+}
+    )
+    }
+    
+ fun `docDeselectAll`(`handle`: kotlin.Long)
+        = 
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_deselect_all(
+    
+        
+        FfiConverterLong.lower(`handle`),_status)
+}
+    
+    
+ fun `docEditOverlay`(`handle`: kotlin.Long, `dotRadius`: kotlin.Float, `dark`: kotlin.Boolean): BridgeOverlayData? {
+            return FfiConverterOptionalTypeBridgeOverlayData.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_edit_overlay(
+    
+        
+        FfiConverterLong.lower(`handle`),
+        FfiConverterFloat.lower(`dotRadius`),
+        FfiConverterBoolean.lower(`dark`),_status)
+}
+    )
+    }
+    
+
+    @Throws(EngineException::class) fun `docExportFiles`(`snapshot`: kotlin.Long, `optionsJson`: kotlin.String): List<BridgeExportFile> {
+            return FfiConverterSequenceTypeBridgeExportFile.lift(
+    uniffiRustCallWithError(EngineException) { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_export_files(
+    
+        
+        FfiConverterLong.lower(`snapshot`),
+        FfiConverterString.lower(`optionsJson`),_status)
+}
+    )
+    }
+    
+
+    @Throws(EngineException::class) fun `docExportStl`(`snapshot`: kotlin.Long, `objectsJson`: kotlin.String?): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(EngineException) { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_export_stl(
+    
+        
+        FfiConverterLong.lower(`snapshot`),
+        FfiConverterOptionalString.lower(`objectsJson`),_status)
+}
+    )
+    }
+    
+ fun `docFixPlan`(`snapshot`: kotlin.Long, `optionsJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_fix_plan(
+    
+        
+        FfiConverterLong.lower(`snapshot`),
+        FfiConverterString.lower(`optionsJson`),_status)
+}
+    )
+    }
+    
+ fun `docFree`(`handle`: kotlin.Long)
+        = 
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_free(
+    
+        
+        FfiConverterLong.lower(`handle`),_status)
+}
+    
+    
+ fun `docFreeHeld`(`id`: kotlin.Long)
+        = 
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_free_held(
+    
+        
+        FfiConverterLong.lower(`id`),_status)
+}
+    
+    
+ fun `docFreeSnapshot`(`snapshot`: kotlin.Long)
+        = 
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_free_snapshot(
+    
+        
+        FfiConverterLong.lower(`snapshot`),_status)
+}
+    
+    
+ fun `docGizmoCommand`(`handle`: kotlin.Long, `json`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_gizmo_command(
+    
+        
+        FfiConverterLong.lower(`handle`),
+        FfiConverterString.lower(`json`),_status)
+}
+    )
+    }
+    
+ fun `docImportLimits`(`physicalMemory`: kotlin.Long, `availableMemory`: kotlin.Long): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_import_limits(
+    
+        
+        FfiConverterLong.lower(`physicalMemory`),
+        FfiConverterLong.lower(`availableMemory`),_status)
+}
+    )
+    }
+    
+ fun `docImportLoad`(`job`: kotlin.Long, `fileName`: kotlin.String, `bytes`: kotlin.ByteArray, `physicalMemory`: kotlin.Long, `availableMemory`: kotlin.Long, `defaultName`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_import_load(
+    
+        
+        FfiConverterLong.lower(`job`),
+        FfiConverterString.lower(`fileName`),
+        FfiConverterByteArray.lower(`bytes`),
+        FfiConverterLong.lower(`physicalMemory`),
+        FfiConverterLong.lower(`availableMemory`),
+        FfiConverterString.lower(`defaultName`),_status)
+}
+    )
+    }
+    
+ fun `docImportPrepare`(`job`: kotlin.Long, `loaded`: kotlin.Long, `target`: kotlin.Int, `defaultName`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_import_prepare(
+    
+        
+        FfiConverterLong.lower(`job`),
+        FfiConverterLong.lower(`loaded`),
+        FfiConverterInt.lower(`target`),
+        FfiConverterString.lower(`defaultName`),_status)
+}
+    )
+    }
+    
+ fun `docNew`(): kotlin.Long {
+            return FfiConverterLong.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_new(
+    
+        _status)
+}
+    )
+    }
+    
+ fun `docNewCommandControl`(): kotlin.Long {
+            return FfiConverterLong.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_new_command_control(
+    
+        _status)
+}
+    )
+    }
+    
+ fun `docNewImportJob`(): kotlin.Long {
+            return FfiConverterLong.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_new_import_job(
+    
+        _status)
+}
+    )
+    }
+    
+ fun `docOpenProject`(`handle`: kotlin.Long, `json`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_open_project(
+    
+        
+        FfiConverterLong.lower(`handle`),
+        FfiConverterString.lower(`json`),_status)
+}
+    )
+    }
+    
+ fun `docOpenProjectData`(`handle`: kotlin.Long, `bytes`: kotlin.ByteArray): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_open_project_data(
+    
+        
+        FfiConverterLong.lower(`handle`),
+        FfiConverterByteArray.lower(`bytes`),_status)
+}
+    )
+    }
+    
+ fun `docPick`(`handle`: kotlin.Long, `ox`: kotlin.Float, `oy`: kotlin.Float, `oz`: kotlin.Float, `dx`: kotlin.Float, `dy`: kotlin.Float, `dz`: kotlin.Float): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_pick(
+    
+        
+        FfiConverterLong.lower(`handle`),
+        FfiConverterFloat.lower(`ox`),
+        FfiConverterFloat.lower(`oy`),
+        FfiConverterFloat.lower(`oz`),
+        FfiConverterFloat.lower(`dx`),
+        FfiConverterFloat.lower(`dy`),
+        FfiConverterFloat.lower(`dz`),_status)
+}
+    )
+    }
+    
+ fun `docPreview`(`handle`: kotlin.Long, `commandJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_preview(
+    
+        
+        FfiConverterLong.lower(`handle`),
+        FfiConverterString.lower(`commandJson`),_status)
+}
+    )
+    }
+    
+ fun `docPrintCheck`(`snapshot`: kotlin.Long, `optionsJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_print_check(
+    
+        
+        FfiConverterLong.lower(`snapshot`),
+        FfiConverterString.lower(`optionsJson`),_status)
+}
+    )
+    }
+    
+
+    @Throws(EngineException::class) fun `docProjectData`(`handle`: kotlin.Long, `cameraJson`: kotlin.String?): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(EngineException) { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_project_data(
+    
+        
+        FfiConverterLong.lower(`handle`),
+        FfiConverterOptionalString.lower(`cameraJson`),_status)
+}
+    )
+    }
+    
+ fun `docProjectJson`(`handle`: kotlin.Long): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_project_json(
+    
+        
+        FfiConverterLong.lower(`handle`),_status)
+}
+    )
+    }
+    
+ fun `docRedo`(`handle`: kotlin.Long): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_redo(
+    
+        
+        FfiConverterLong.lower(`handle`),_status)
+}
+    )
+    }
+    
+
+    @Throws(EngineException::class) fun `docReencodeProject`(`bytes`: kotlin.ByteArray): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(EngineException) { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_reencode_project(
+    
+        
+        FfiConverterByteArray.lower(`bytes`),_status)
+}
+    )
+    }
+    
+ fun `docRenderListJson`(`handle`: kotlin.Long): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_render_list_json(
+    
+        
+        FfiConverterLong.lower(`handle`),_status)
+}
+    )
+    }
+    
+ fun `docRenderMesh`(`handle`: kotlin.Long, `id`: kotlin.String): BridgeRenderMesh? {
+            return FfiConverterOptionalTypeBridgeRenderMesh.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_render_mesh(
+    
+        
+        FfiConverterLong.lower(`handle`),
+        FfiConverterString.lower(`id`),_status)
+}
+    )
+    }
+    
+ fun `docReset`(`handle`: kotlin.Long)
+        = 
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_reset(
+    
+        
+        FfiConverterLong.lower(`handle`),_status)
+}
+    
+    
+ fun `docRunTool`(`handle`: kotlin.Long, `tool`: kotlin.String, `optionsJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_run_tool(
+    
+        
+        FfiConverterLong.lower(`handle`),
+        FfiConverterString.lower(`tool`),
+        FfiConverterString.lower(`optionsJson`),_status)
+}
+    )
+    }
+    
+ fun `docSelectAll`(`handle`: kotlin.Long)
+        = 
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_select_all(
+    
+        
+        FfiConverterLong.lower(`handle`),_status)
+}
+    
+    
+ fun `docSelectLinked`(`handle`: kotlin.Long): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_select_linked(
+    
+        
+        FfiConverterLong.lower(`handle`),_status)
+}
+    )
+    }
+    
+ fun `docSelectNoElements`(`handle`: kotlin.Long)
+        = 
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_select_no_elements(
+    
+        
+        FfiConverterLong.lower(`handle`),_status)
+}
+    
+    
+ fun `docSelectObject`(`handle`: kotlin.Long, `id`: kotlin.String, `extend`: kotlin.Boolean)
+        = 
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_select_object(
+    
+        
+        FfiConverterLong.lower(`handle`),
+        FfiConverterString.lower(`id`),
+        FfiConverterBoolean.lower(`extend`),_status)
+}
+    
+    
+ fun `docSetEditMode`(`handle`: kotlin.Long, `mode`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_set_edit_mode(
+    
+        
+        FfiConverterLong.lower(`handle`),
+        FfiConverterString.lower(`mode`),_status)
+}
+    )
+    }
+    
+ fun `docSetSelection`(`handle`: kotlin.Long, `idsJson`: kotlin.String, `active`: kotlin.String?)
+        = 
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_set_selection(
+    
+        
+        FfiConverterLong.lower(`handle`),
+        FfiConverterString.lower(`idsJson`),
+        FfiConverterOptionalString.lower(`active`),_status)
+}
+    
+    
+ fun `docSetUndoBudget`(`handle`: kotlin.Long, `bytes`: kotlin.Long)
+        = 
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_set_undo_budget(
+    
+        
+        FfiConverterLong.lower(`handle`),
+        FfiConverterLong.lower(`bytes`),_status)
+}
+    
+    
+ fun `docSnapshot`(`handle`: kotlin.Long): kotlin.Long {
+            return FfiConverterLong.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_snapshot(
+    
+        
+        FfiConverterLong.lower(`handle`),_status)
+}
+    )
+    }
+    
+ fun `docSnapshotRevision`(`snapshot`: kotlin.Long): kotlin.Int {
+            return FfiConverterInt.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_snapshot_revision(
+    
+        
+        FfiConverterLong.lower(`snapshot`),_status)
+}
+    )
+    }
+    
+ fun `docStateJson`(`handle`: kotlin.Long): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_state_json(
+    
+        
+        FfiConverterLong.lower(`handle`),_status)
+}
+    )
+    }
+    
+ fun `docSummaryJson`(`handle`: kotlin.Long): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_summary_json(
+    
+        
+        FfiConverterLong.lower(`handle`),_status)
+}
+    )
+    }
+    
+ fun `docTapElement`(`handle`: kotlin.Long, `cameraJson`: kotlin.String, `x`: kotlin.Float, `y`: kotlin.Float, `density`: kotlin.Float, `extend`: kotlin.Boolean): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_tap_element(
+    
+        
+        FfiConverterLong.lower(`handle`),
+        FfiConverterString.lower(`cameraJson`),
+        FfiConverterFloat.lower(`x`),
+        FfiConverterFloat.lower(`y`),
+        FfiConverterFloat.lower(`density`),
+        FfiConverterBoolean.lower(`extend`),_status)
+}
+    )
+    }
+    
+ fun `docUndo`(`handle`: kotlin.Long): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_undo(
+    
+        
+        FfiConverterLong.lower(`handle`),_status)
+}
+    )
+    }
+    
+ fun `docVoiceCall`(`handle`: kotlin.Long, `name`: kotlin.String, `argsJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_doc_voice_call(
+    
+        
+        FfiConverterLong.lower(`handle`),
+        FfiConverterString.lower(`name`),
+        FfiConverterString.lower(`argsJson`),_status)
 }
     )
     }
@@ -3378,6 +4762,19 @@ public object FfiConverterSequenceTypeSnapshotObject: FfiConverterRustBuffer<Lis
         
         FfiConverterString.lower(`prompt`),
         FfiConverterString.lower(`optionsJson`),_status)
+}
+    )
+    }
+    
+ fun `voiceCall`(`name`: kotlin.String, `argsJson`: kotlin.String, `payload`: kotlin.String?): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_voice_call(
+    
+        
+        FfiConverterString.lower(`name`),
+        FfiConverterString.lower(`argsJson`),
+        FfiConverterOptionalString.lower(`payload`),_status)
 }
     )
     }

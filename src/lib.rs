@@ -1,6 +1,7 @@
 //! sculpt-engine: the shared render and sculpt engine for Sculptor and Dream Builder.
 //! See DESIGN.md for the architecture.
 
+pub mod bridge;
 pub mod brush;
 pub mod bvh;
 pub mod camera;

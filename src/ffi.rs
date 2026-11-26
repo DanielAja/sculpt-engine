@@ -614,6 +614,542 @@ pub fn extrude_profile_2d(points_xy: Vec<f32>, options_json: String) -> Result<S
         .map_err(EngineError::Invalid)
 }
 
+// ── Pure-Rust Document, Edit, IO & Voice Bridge (replaces legacy Swift libSculptorAndroid.so) ──
+
+#[derive(uniffi::Record)]
+pub struct BridgeRenderMesh {
+    pub positions: Vec<f32>,
+    pub normals: Vec<f32>,
+    pub indices: Vec<u32>,
+    pub hull_positions: Vec<f32>,
+    pub hull_normals: Vec<f32>,
+    pub hull_indices: Vec<u32>,
+}
+
+#[derive(uniffi::Record)]
+pub struct BridgeOverlayData {
+    pub revision: i32,
+    pub matrix: Vec<f32>,
+    pub line_positions: Vec<f32>,
+    pub line_colors: Vec<f32>,
+    pub line_indices: Vec<u32>,
+    pub dot_positions: Vec<f32>,
+    pub dot_colors: Vec<f32>,
+    pub dot_indices: Vec<u32>,
+    pub face_positions: Vec<f32>,
+    pub face_colors: Vec<f32>,
+    pub face_indices: Vec<u32>,
+}
+
+#[derive(uniffi::Record)]
+pub struct BridgeExportFile {
+    pub file_name: String,
+    pub data: Vec<u8>,
+}
+
+#[uniffi::export]
+pub fn doc_bridge_version() -> i32 {
+    crate::bridge::BRIDGE_VERSION
+}
+
+#[uniffi::export]
+pub fn doc_core_version() -> String {
+    crate::bridge::CORE_VERSION.to_string()
+}
+
+#[uniffi::export]
+pub fn doc_new() -> i64 {
+    crate::bridge::BridgeRegistry::global().new_doc()
+}
+
+#[uniffi::export]
+pub fn doc_free(handle: i64) {
+    crate::bridge::BridgeRegistry::global().free_doc(handle);
+}
+
+#[uniffi::export]
+pub fn doc_reset(handle: i64) {
+    crate::bridge::with_doc(handle, (), |d| d.reset());
+}
+
+#[uniffi::export]
+pub fn doc_apply(handle: i64, command_json: String) -> String {
+    crate::bridge::with_doc(handle, crate::bridge::BridgeError::new("engine.badHandle").to_envelope(), |d| {
+        crate::bridge::commands::doc_apply(d, &command_json)
+    })
+}
+
+#[uniffi::export]
+pub fn doc_apply_group(handle: i64, json: String) -> String {
+    crate::bridge::with_doc(handle, crate::bridge::BridgeError::new("engine.badHandle").to_envelope(), |d| {
+        crate::bridge::commands::doc_apply_group(d, &json)
+    })
+}
+
+#[uniffi::export]
+pub fn doc_undo(handle: i64) -> bool {
+    crate::bridge::with_doc(handle, false, |d| d.undo())
+}
+
+#[uniffi::export]
+pub fn doc_redo(handle: i64) -> bool {
+    crate::bridge::with_doc(handle, false, |d| d.redo())
+}
+
+#[uniffi::export]
+pub fn doc_preview(handle: i64, command_json: String) -> String {
+    crate::bridge::with_doc(handle, crate::bridge::BridgeError::new("engine.badHandle").to_envelope(), |d| {
+        crate::bridge::commands::doc_preview(d, &command_json)
+    })
+}
+
+#[uniffi::export]
+pub fn doc_clear_preview(handle: i64) {
+    crate::bridge::with_doc(handle, (), |d| {
+        d.preview_transforms.clear();
+        d.preview_meshes.clear();
+    });
+}
+
+#[uniffi::export]
+pub fn doc_set_selection(handle: i64, ids_json: String, active: Option<String>) {
+    let ids: Vec<String> = serde_json::from_str(&ids_json).unwrap_or_default();
+    crate::bridge::with_doc(handle, (), |d| {
+        let valid: std::collections::HashSet<&str> = d.scene.objects.iter().map(|o| o.id.as_str()).collect();
+        let mut objs: Vec<String> = ids.into_iter().filter(|id| valid.contains(id.as_str())).collect();
+        objs.sort();
+        objs.dedup();
+        let act = active.filter(|a| objs.contains(a)).or_else(|| objs.last().cloned());
+        d.selection = crate::format::Selection { objects: objs, active: act, elements: Default::default() };
+    });
+}
+
+#[uniffi::export]
+pub fn doc_select_object(handle: i64, id: String, extend: bool) {
+    crate::bridge::with_doc(handle, (), |d| {
+        let Some(obj) = d.scene.objects.iter().find(|o| o.id == id) else { return };
+        let locked = obj.is_locked;
+        if matches!(d.edit_mode, crate::bridge::EditMode::Edit(_)) && d.selection.active.as_deref() != Some(id.as_str()) {
+            d.selection.objects = vec![id.clone()];
+            d.selection.active = Some(id);
+            d.selection.elements = Default::default();
+            if locked { d.edit_mode = crate::bridge::EditMode::Object; }
+            d.last_picked_vertex = None;
+            return;
+        }
+        if extend {
+            if let Some(pos) = d.selection.objects.iter().position(|x| x == &id) {
+                d.selection.objects.remove(pos);
+                if d.selection.active.as_deref() == Some(id.as_str()) {
+                    d.selection.active = d.selection.objects.last().cloned();
+                }
+            } else {
+                d.selection.objects.push(id.clone());
+                d.selection.active = Some(id);
+            }
+        } else {
+            d.selection.objects = vec![id.clone()];
+            d.selection.active = Some(id);
+        }
+    });
+}
+
+#[uniffi::export]
+pub fn doc_select_all(handle: i64) {
+    crate::bridge::with_doc(handle, (), |d| {
+        if let (crate::bridge::EditMode::Edit(mode), Some(aid)) = (d.edit_mode, d.selection.active.clone()) {
+            if let Some(obj) = d.scene.objects.iter().find(|o| o.id == aid) {
+                let all_v: std::collections::HashSet<usize> = (0..obj.mesh.positions.len()).collect();
+                d.selection.elements = crate::bridge::edit::elements_from_vertices(&all_v, mode, &obj.mesh);
+                return;
+            }
+        }
+        let ids: Vec<String> = d.scene.objects.iter().filter(|o| o.is_visible && !o.is_locked).map(|o| o.id.clone()).collect();
+        d.selection.active = ids.last().cloned();
+        d.selection.objects = ids;
+    });
+}
+
+#[uniffi::export]
+pub fn doc_deselect_all(handle: i64) {
+    crate::bridge::with_doc(handle, (), |d| {
+        d.selection.objects.clear();
+        d.selection.active = None;
+        d.selection.elements = Default::default();
+        d.last_picked_vertex = None;
+    });
+}
+
+#[uniffi::export]
+pub fn doc_set_undo_budget(handle: i64, bytes: i64) {
+    if bytes > 0 {
+        crate::bridge::with_doc(handle, (), |d| d.undo_memory_budget = bytes as usize);
+    }
+}
+
+#[uniffi::export]
+pub fn doc_state_json(handle: i64) -> String {
+    crate::bridge::with_doc(handle, "{}".to_string(), |d| d.state_json())
+}
+
+#[uniffi::export]
+pub fn doc_render_list_json(handle: i64) -> String {
+    crate::bridge::with_doc(handle, r#"{"objects":[],"bounds":null}"#.to_string(), |d| d.render_list_json())
+}
+
+#[uniffi::export]
+pub fn doc_summary_json(handle: i64) -> String {
+    crate::bridge::with_doc(handle, "{}".to_string(), |d| d.summary_json())
+}
+
+#[uniffi::export]
+pub fn doc_bounds_json(handle: i64, ids_json: String, elements: bool) -> String {
+    let ids: Vec<String> = serde_json::from_str(&ids_json).unwrap_or_default();
+    crate::bridge::with_doc(handle, "null".to_string(), |d| d.bounds_json(&ids, elements))
+}
+
+#[uniffi::export]
+pub fn doc_render_mesh(handle: i64, id: String) -> Option<BridgeRenderMesh> {
+    crate::bridge::with_doc(handle, None, |d| d.render_mesh(&id)).map(|r| BridgeRenderMesh {
+        positions: r.positions,
+        normals: r.normals,
+        indices: r.indices,
+        hull_positions: r.hull_positions,
+        hull_normals: r.hull_normals,
+        hull_indices: r.hull_indices,
+    })
+}
+
+#[uniffi::export]
+pub fn doc_pick(handle: i64, ox: f32, oy: f32, oz: f32, dx: f32, dy: f32, dz: f32) -> Option<String> {
+    crate::bridge::with_doc(handle, None, |d| d.pick(Vec3::new(ox, oy, oz), Vec3::new(dx, dy, dz)))
+}
+
+#[uniffi::export]
+pub fn doc_set_edit_mode(handle: i64, mode: String) -> String {
+    crate::bridge::with_doc(handle, crate::bridge::BridgeError::new("engine.badHandle").to_envelope(), |d| {
+        crate::bridge::edit::set_edit_mode(d, &mode)
+    })
+}
+
+#[uniffi::export]
+pub fn doc_run_tool(handle: i64, tool: String, options_json: String) -> String {
+    crate::bridge::with_doc(handle, crate::bridge::BridgeError::new("engine.badHandle").to_envelope(), |d| {
+        crate::bridge::edit::run_tool(d, &tool, &options_json)
+    })
+}
+
+#[uniffi::export]
+pub fn doc_select_no_elements(handle: i64) {
+    crate::bridge::with_doc(handle, (), |d| {
+        d.selection.elements = Default::default();
+        d.last_picked_vertex = None;
+    });
+}
+
+#[uniffi::export]
+pub fn doc_select_linked(handle: i64) -> String {
+    crate::bridge::with_doc(handle, crate::bridge::ok_empty(), |d| crate::bridge::edit::select_linked(d))
+}
+
+#[uniffi::export]
+pub fn doc_tap_element(handle: i64, camera_json: String, x: f32, y: f32, density: f32, extend: bool) -> String {
+    crate::bridge::with_doc(handle, r#"{"ok":true,"hit":null}"#.to_string(), |d| {
+        crate::bridge::edit::tap_element(d, &camera_json, x, y, density, extend)
+    })
+}
+
+#[uniffi::export]
+pub fn doc_box_select(handle: i64, camera_json: String, x0: f32, y0: f32, x1: f32, y1: f32, extend: bool) -> String {
+    crate::bridge::with_doc(handle, r#"{"ok":true,"count":0}"#.to_string(), |d| {
+        crate::bridge::edit::box_select(d, &camera_json, x0, y0, x1, y1, extend)
+    })
+}
+
+#[uniffi::export]
+pub fn doc_gizmo_command(handle: i64, json: String) -> String {
+    crate::bridge::with_doc(handle, crate::bridge::BridgeError::new("engine.badHandle").to_envelope(), |d| {
+        crate::bridge::edit::gizmo_command(d, &json)
+    })
+}
+
+#[uniffi::export]
+pub fn doc_can_drag(handle: i64) -> String {
+    crate::bridge::with_doc(handle, crate::bridge::BridgeError::new("engine.badHandle").to_envelope(), |d| {
+        crate::bridge::edit::can_drag(d)
+    })
+}
+
+#[uniffi::export]
+pub fn doc_edit_overlay(handle: i64, dot_radius: f32, dark: bool) -> Option<BridgeOverlayData> {
+    crate::bridge::with_doc(handle, None, |d| crate::bridge::edit::build_edit_overlay(d, dot_radius, dark)).map(|o| BridgeOverlayData {
+        revision: o.revision,
+        matrix: o.matrix,
+        line_positions: o.line_positions,
+        line_colors: o.line_colors,
+        line_indices: o.line_indices,
+        dot_positions: o.dot_positions,
+        dot_colors: o.dot_colors,
+        dot_indices: o.dot_indices,
+        face_positions: o.face_positions,
+        face_colors: o.face_colors,
+        face_indices: o.face_indices,
+    })
+}
+
+#[uniffi::export]
+pub fn doc_project_json(handle: i64) -> String {
+    crate::bridge::with_doc(handle, crate::bridge::BridgeError::new("engine.badHandle").to_envelope(), |d| {
+        let mut m = serde_json::Map::new();
+        m.insert("project".into(), serde_json::Value::String(d.to_project_file(None).encode()));
+        crate::bridge::ok_envelope(m)
+    })
+}
+
+#[uniffi::export]
+pub fn doc_open_project(handle: i64, json: String) -> String {
+    crate::bridge::with_doc(handle, crate::bridge::BridgeError::new("engine.badHandle").to_envelope(), |d| {
+        d.open_project_bytes(json.as_bytes())
+    })
+}
+
+#[uniffi::export]
+pub fn doc_project_data(handle: i64, camera_json: Option<String>) -> Result<Vec<u8>, EngineError> {
+    let reg = crate::bridge::BridgeRegistry::global();
+    let arc = reg.get_doc(handle).ok_or_else(|| EngineError::Invalid(crate::bridge::BridgeError::new("engine.badHandle").to_error_json()))?;
+    let guard = arc.lock().unwrap_or_else(|e| e.into_inner());
+    Ok(guard.to_project_file(camera_json.as_deref()).encode().into_bytes())
+}
+
+#[uniffi::export]
+pub fn doc_open_project_data(handle: i64, bytes: Vec<u8>) -> String {
+    crate::bridge::with_doc(handle, crate::bridge::BridgeError::new("engine.badHandle").to_envelope(), |d| {
+        d.open_project_bytes(&bytes)
+    })
+}
+
+#[uniffi::export]
+pub fn doc_reencode_project(bytes: Vec<u8>) -> Result<Vec<u8>, EngineError> {
+    crate::format::ProjectFile::decode(&bytes)
+        .map(|pf| pf.encode().into_bytes())
+        .map_err(|e| EngineError::Format(crate::bridge::BridgeError::from(e).to_error_json()))
+}
+
+#[uniffi::export]
+pub fn doc_snapshot(handle: i64) -> i64 {
+    let reg = crate::bridge::BridgeRegistry::global();
+    let Some(arc) = reg.get_doc(handle) else { return 0 };
+    let snap = {
+        let d = arc.lock().unwrap_or_else(|e| e.into_inner());
+        crate::bridge::SceneSnapshot { scene: d.scene.clone(), selection: d.selection.clone(), revision: d.revision }
+    };
+    reg.put_snapshot(snap)
+}
+
+#[uniffi::export]
+pub fn doc_free_snapshot(snapshot: i64) {
+    crate::bridge::BridgeRegistry::global().free_snapshot(snapshot);
+}
+
+#[uniffi::export]
+pub fn doc_snapshot_revision(snapshot: i64) -> i32 {
+    crate::bridge::BridgeRegistry::global().get_snapshot(snapshot).map(|s| s.revision).unwrap_or(0)
+}
+
+#[uniffi::export]
+pub fn doc_new_command_control() -> i64 {
+    crate::bridge::BridgeRegistry::global().put_held(crate::bridge::HeldObject::Control(Arc::new(crate::bridge::CommandControl::new())))
+}
+
+#[uniffi::export]
+pub fn doc_command_progress(control: i64) -> f64 {
+    let guard = crate::bridge::BridgeRegistry::global().held.lock().unwrap();
+    match guard.get(&control) {
+        Some(crate::bridge::HeldObject::Control(c)) | Some(crate::bridge::HeldObject::ImportJob(c)) => c.progress(),
+        _ => 0.0,
+    }
+}
+
+#[uniffi::export]
+pub fn doc_cancel_command(control: i64) {
+    let guard = crate::bridge::BridgeRegistry::global().held.lock().unwrap();
+    if let Some(crate::bridge::HeldObject::Control(c) | crate::bridge::HeldObject::ImportJob(c)) = guard.get(&control) {
+        c.cancel();
+    }
+}
+
+#[uniffi::export]
+pub fn doc_apply_off_main(snapshot: i64, command_json: String, control: i64) -> Result<i64, EngineError> {
+    let reg = crate::bridge::BridgeRegistry::global();
+    let snap = reg.get_snapshot(snapshot).ok_or_else(|| EngineError::Invalid(crate::bridge::BridgeError::new("engine.badHandle").to_error_json()))?;
+    let ctl = {
+        let guard = reg.held.lock().unwrap();
+        match guard.get(&control) {
+            Some(crate::bridge::HeldObject::Control(c)) => Some(c.clone()),
+            _ => None,
+        }
+    };
+    let applied = crate::bridge::commands::apply_off_main(&snap, &command_json, ctl.as_deref())
+        .map_err(|e| EngineError::Invalid(e.to_error_json()))?;
+    Ok(reg.put_held(crate::bridge::HeldObject::Applied(applied)))
+}
+
+#[uniffi::export]
+pub fn doc_commit_if_unchanged(handle: i64, result: i64, start_revision: i32) -> String {
+    let reg = crate::bridge::BridgeRegistry::global();
+    let applied = {
+        let guard = reg.held.lock().unwrap();
+        match guard.get(&result) {
+            Some(crate::bridge::HeldObject::Applied(a)) => a.clone(),
+            _ => return crate::bridge::BridgeError::new("engine.badHandle").to_envelope(),
+        }
+    };
+    crate::bridge::with_doc(handle, crate::bridge::BridgeError::new("engine.badHandle").to_envelope(), |d| {
+        if d.revision != start_revision || applied.start_revision != start_revision {
+            let mut m = serde_json::Map::new();
+            m.insert("committed".into(), serde_json::Value::Bool(false));
+            return crate::bridge::ok_envelope(m);
+        }
+        d.record_scene_change(applied.label, applied.scene, &applied.created, applied.new_elements);
+        let mut m = serde_json::Map::new();
+        m.insert("committed".into(), serde_json::Value::Bool(true));
+        m.insert("created".into(), serde_json::json!(applied.created));
+        crate::bridge::ok_envelope(m)
+    })
+}
+
+#[uniffi::export]
+pub fn doc_free_held(id: i64) {
+    crate::bridge::BridgeRegistry::global().free_held(id);
+}
+
+#[uniffi::export]
+pub fn doc_export_stl(snapshot: i64, objects_json: Option<String>) -> Result<Vec<u8>, EngineError> {
+    let snap = crate::bridge::BridgeRegistry::global()
+        .get_snapshot(snapshot)
+        .ok_or_else(|| EngineError::Invalid(crate::bridge::BridgeError::new("engine.badHandle").to_error_json()))?;
+    crate::bridge::io::export_stl(&snap, objects_json.as_deref()).map_err(|e| EngineError::Invalid(e.to_error_json()))
+}
+
+#[uniffi::export]
+pub fn doc_export_files(snapshot: i64, options_json: String) -> Result<Vec<BridgeExportFile>, EngineError> {
+    let snap = crate::bridge::BridgeRegistry::global()
+        .get_snapshot(snapshot)
+        .ok_or_else(|| EngineError::Invalid(crate::bridge::BridgeError::new("engine.badHandle").to_error_json()))?;
+    crate::bridge::io::export_files(&snap, &options_json)
+        .map(|v| v.into_iter().map(|f| BridgeExportFile { file_name: f.file_name, data: f.data }).collect())
+        .map_err(|e| EngineError::Invalid(e.to_error_json()))
+}
+
+#[uniffi::export]
+pub fn doc_print_check(snapshot: i64, options_json: String) -> String {
+    let Some(snap) = crate::bridge::BridgeRegistry::global().get_snapshot(snapshot) else { return "null".to_string() };
+    crate::bridge::io::print_check(&snap, &options_json)
+}
+
+#[uniffi::export]
+pub fn doc_fix_plan(snapshot: i64, options_json: String) -> String {
+    let Some(snap) = crate::bridge::BridgeRegistry::global().get_snapshot(snapshot) else {
+        return r#"{"commands":[],"repaired":0,"moved":false,"revision":0}"#.to_string();
+    };
+    crate::bridge::io::fix_plan(&snap, &options_json)
+}
+
+#[uniffi::export]
+pub fn doc_new_import_job() -> i64 {
+    crate::bridge::BridgeRegistry::global().put_held(crate::bridge::HeldObject::ImportJob(Arc::new(crate::bridge::CommandControl::new())))
+}
+
+#[uniffi::export]
+pub fn doc_import_load(
+    job: i64,
+    file_name: String,
+    bytes: Vec<u8>,
+    physical_memory: i64,
+    available_memory: i64,
+    default_name: String,
+) -> String {
+    let reg = crate::bridge::BridgeRegistry::global();
+    let ctl = {
+        let guard = reg.held.lock().unwrap();
+        match guard.get(&job) {
+            Some(crate::bridge::HeldObject::ImportJob(c)) => Some(c.clone()),
+            _ => None,
+        }
+    };
+    match crate::bridge::io::import_load(ctl.as_deref(), &file_name, &bytes, physical_memory, available_memory, &default_name) {
+        Ok((loaded, info)) => {
+            let lid = reg.put_held(crate::bridge::HeldObject::ImportLoaded(loaded));
+            let mut m = serde_json::Map::new();
+            m.insert("loaded".into(), serde_json::json!(lid));
+            m.insert("info".into(), info);
+            crate::bridge::ok_envelope(m)
+        }
+        Err(e) => e.to_envelope(),
+    }
+}
+
+#[uniffi::export]
+pub fn doc_import_prepare(job: i64, loaded: i64, target: i32, default_name: String) -> String {
+    let reg = crate::bridge::BridgeRegistry::global();
+    let (ctl, res) = {
+        let guard = reg.held.lock().unwrap();
+        let ctl = match guard.get(&job) {
+            Some(crate::bridge::HeldObject::ImportJob(c)) => Some(c.clone()),
+            _ => None,
+        };
+        let res = match guard.get(&loaded) {
+            Some(crate::bridge::HeldObject::ImportLoaded(l)) => {
+                Some(crate::bridge::io::import_prepare(ctl.as_deref(), l, target, &default_name))
+            }
+            _ => None,
+        };
+        (ctl, res)
+    };
+    let _ = ctl;
+    match res {
+        Some(Ok(prep)) => {
+            let tris = prep.triangles;
+            let pid = reg.put_held(crate::bridge::HeldObject::ImportPrepared(prep));
+            let mut m = serde_json::Map::new();
+            m.insert("prepared".into(), serde_json::json!(pid));
+            m.insert("triangles".into(), serde_json::json!(tris));
+            crate::bridge::ok_envelope(m)
+        }
+        Some(Err(e)) => e.to_envelope(),
+        None => crate::bridge::BridgeError::new("engine.badHandle").to_envelope(),
+    }
+}
+
+#[uniffi::export]
+pub fn doc_commit_import(handle: i64, prepared: i64, as_new_document: bool, label: String) -> String {
+    let reg = crate::bridge::BridgeRegistry::global();
+    let guard = reg.held.lock().unwrap();
+    let Some(crate::bridge::HeldObject::ImportPrepared(prep)) = guard.get(&prepared) else {
+        return crate::bridge::BridgeError::new("engine.badHandle").to_envelope();
+    };
+    crate::bridge::with_doc(handle, crate::bridge::BridgeError::new("engine.badHandle").to_envelope(), |d| {
+        crate::bridge::io::commit_import(d, prep, as_new_document, &label)
+    })
+}
+
+#[uniffi::export]
+pub fn doc_import_limits(physical_memory: i64, available_memory: i64) -> String {
+    crate::bridge::io::ImportLimits::for_device(physical_memory, available_memory).to_json()
+}
+
+#[uniffi::export]
+pub fn doc_voice_call(handle: i64, name: String, args_json: String) -> String {
+    crate::bridge::with_doc(handle, crate::bridge::BridgeError::new("engine.badHandle").to_envelope(), |d| {
+        crate::bridge::voice::doc_voice_call(d, &name, &args_json)
+    })
+}
+
+#[uniffi::export]
+pub fn voice_call(name: String, args_json: String, payload: Option<String>) -> String {
+    crate::bridge::voice::call(&name, &args_json, payload.as_deref())
+}
+
 /// JNI entry for the Android sample: `ANativeWindow_fromSurface` (the caller releases it with the view).
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
