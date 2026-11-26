@@ -2,7 +2,9 @@
 name = "sculpt-engine"
 version = "0.1.0"
 edition = "2024"
-license = "LicenseRef-AJA-Digital"
+license = "MIT"
+repository = "https://github.com/DanielAja/sculpt-engine"
+homepage = "https://ajadigital.co/rust-engine.html"
 description = "Shared render and sculpt engine for Sculptor and Dream Builder"
 publish = false
 
