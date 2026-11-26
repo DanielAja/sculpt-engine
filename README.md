@@ -9,9 +9,43 @@ One crate compiles to iPad, iPhone, Mac, Apple Vision Pro, Android, WebAssembly,
 
 Explore the interactive 3D benchmark visualizer at **[ajadigital.co/rust-engine.html](https://ajadigital.co/rust-engine.html)**.
 
+## Headline benchmark gains
+
+On a quiet Apple M4 (4P + 4E, `rustc 1.99.1`, `--release`), every hot path in `sculpt-engine` is benchmarked in Criterion against standard baselines with output equivalence verified before timing:
+
+- **92.8x faster SDF meshing**: 128^3 Text to 3D sparse octree Surface Nets drops from `9.080 ms` to **`97.81 us`** (1% of an 8.33 ms 120 Hz frame).
+- **52.0x faster 1M triangle BVH build**: parallel Morton HLBVH drops from `249.7 ms` (sort baseline) and `82.40 ms` (partition baseline) to **`4.798 ms`**, with **`408.0 ns`** ray picks.
+- **13.2x faster project JSON I/O**: 88 MB `.sculpt` decode reaches **`17.8 GB/s`** (`4.951 ms` vs `65.43 ms` typed `serde_json`), and streaming encode reaches **`13.7 GB/s`** (`6.394 ms` vs `83.82 ms`).
+- **21.4x faster `.splat` encode and 20.7x smaller Gaussian Splats**: ARM NEON `.splat` decode runs at **`182 GB/s`** (`5.04 us` for 16k splats), radix depth sort processes 500k splats in **`427.7 us`** (`15.0x` faster), and `.dsplat` v2 packs each splat into **12 bytes** (vs 248 B SH3 `.ply`).
+- **37.4 us brush dabs and 340 fps at 1.05M triangles**: zero-allocation sculpt dabs with stamped normal updates and **`2.94 ms`** full-frame rendering at 1080p with SSAO and shadows.
+
 ---
 
-## Benchmarks (Apple M4, Criterion)
+## Run the benchmarks yourself
+
+Do not take our numbers on faith. Every benchmark in this README lives directly in [`benches/core.rs`](benches/core.rs) with built-in equivalence assertions, so you can verify and profile them on your own CPU in a couple of minutes:
+
+```bash
+git clone https://github.com/DanielAja/sculpt-engine.git
+cd sculpt-engine
+cargo test --release --lib
+cargo bench --bench core -- vs_industry_standard
+```
+
+You can also run individual benchmark groups:
+
+```bash
+cargo bench --bench core -- sculpt_format
+cargo bench --bench core -- text3d
+cargo bench --bench core -- img3d_and_splat
+cargo bench --bench core -- ibl
+```
+
+If you run `cargo bench` on x86_64 (AVX2/AVX-512), AMD Ryzen, Apple M1/M2/M3/M4, Snapdragon ARM, or Linux/Windows desktops, please share your Criterion results in [GitHub Issues](https://github.com/DanielAja/sculpt-engine/issues) or open a pull request with optimizations or cross-architecture SIMD improvements.
+
+---
+
+## Full Criterion table (Apple M4)
 
 Measured on a quiet Apple M4 (4P + 4E, macOS 27.0, `rustc 1.99.1`, `--release` with `opt-level = 3` and thin LTO) using identical inputs and output equivalence checks before timing:
 
@@ -28,24 +62,6 @@ Measured on a quiet Apple M4 (4P + 4E, macOS 27.0, `rustc 1.99.1`, `--release` w
 | 500k Gaussian Splat depth sort (radix) | **427.7 us** | 6.406 ms std sort / 1.288 ms radix v1 | **15.0x / 3.01x** |
 | Brush dab (small footprint, ~2.5k verts) | **37.4 us** | 75.8 us (v1) | **2.03x** |
 | 1.05M triangle full frame (1080p, SSAO + shadows) | **2.94 ms** (340 fps) | 8.33 ms 120 Hz budget | **65% headroom** |
-
-### Reproduce locally
-
-```bash
-git clone https://github.com/DanielAja/sculpt-engine.git
-cd sculpt-engine
-cargo test --release --lib
-cargo bench --bench core -- vs_industry_standard
-```
-
-You can also run individual benchmark groups from `benches/core.rs`:
-
-```bash
-cargo bench --bench core -- sculpt_format
-cargo bench --bench core -- text3d
-cargo bench --bench core -- img3d_and_splat
-cargo bench --bench core -- ibl
-```
 
 ---
 
