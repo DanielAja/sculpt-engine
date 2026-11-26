@@ -108,35 +108,43 @@ fn vs_main(v: VIn) -> VOut {
     return o;
 }
 
+const SHADOW_DISC: array<vec2f, 12> = array<vec2f, 12>(
+    vec2f(-0.326, -0.406), vec2f(-0.840, -0.074), vec2f(-0.696, 0.457), vec2f(-0.203, 0.621),
+    vec2f(0.962, -0.195), vec2f(0.473, -0.480), vec2f(0.519, 0.767), vec2f(0.185, -0.893),
+    vec2f(0.507, 0.064), vec2f(0.896, 0.412), vec2f(-0.322, -0.933), vec2f(-0.792, -0.598),
+);
+
 fn shadow_at(world: vec3f, n: vec3f) -> f32 {
     if (F.params.z < 0.5) { return 1.0; }
     // Normal offset scaled by the texel size in world units keeps acne away without peter panning.
-    let texel_world = 2.0 / (F.light_vp[0][0] * f32(textureDimensions(shadow_map).x));
-    let p = F.light_vp * vec4f(world + n * texel_world * 1.5, 1.0);
+    let dim = vec2f(textureDimensions(shadow_map));
+    let texel = 1.0 / dim;
+    let texel_world = 2.0 * texel.x / F.light_vp[0][0];
+    let p = F.light_vp * vec4f(world + n * (texel_world * 1.5), 1.0);
     let uv = vec2f(p.x * 0.5 + 0.5, 0.5 - p.y * 0.5);
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || p.z > 1.0) { return 1.0; }
-    let texel = 1.0 / vec2f(textureDimensions(shadow_map));
     let a = F.jitter.z;
-    let rot = mat2x2f(cos(a), sin(a), -sin(a), cos(a));
+    let ca = cos(a);
+    let sa = sin(a);
+    let step = texel * 2.0;
+    let rot_step = mat2x2f(ca * step.x, sa * step.y, -sa * step.x, ca * step.y);
+    let ref_z = p.z - 0.0015;
     var s = 0.0;
     // 12 tap rotated Poisson disc (radius ~2 texels).
-    let disc = array<vec2f, 12>(
-        vec2f(-0.326, -0.406), vec2f(-0.840, -0.074), vec2f(-0.696, 0.457), vec2f(-0.203, 0.621),
-        vec2f(0.962, -0.195), vec2f(0.473, -0.480), vec2f(0.519, 0.767), vec2f(0.185, -0.893),
-        vec2f(0.507, 0.064), vec2f(0.896, 0.412), vec2f(-0.322, -0.933), vec2f(-0.792, -0.598));
     for (var k = 0; k < 12; k++) {
-        s += textureSampleCompareLevel(shadow_map, shadow_cmp, uv + rot * disc[k] * texel * 2.0, p.z - 0.0015);
+        s += textureSampleCompareLevel(shadow_map, shadow_cmp, uv + rot_step * SHADOW_DISC[k], ref_z);
     }
-    return s / 12.0;
+    return s * (1.0 / 12.0);
 }
 
+// SH basis constants are pre-multiplied into `F.sh` on the CPU.
 fn sh_irradiance(n: vec3f) -> vec3f {
     let x = n.x; let y = n.y; let z = n.z;
-    var c = F.sh[0].xyz * 0.282095;
-    c += F.sh[1].xyz * 0.488603 * y + F.sh[2].xyz * 0.488603 * z + F.sh[3].xyz * 0.488603 * x;
-    c += F.sh[4].xyz * 1.092548 * x * y + F.sh[5].xyz * 1.092548 * y * z;
-    c += F.sh[6].xyz * 0.315392 * (3.0 * z * z - 1.0) + F.sh[7].xyz * 1.092548 * x * z;
-    c += F.sh[8].xyz * 0.546274 * (x * x - y * y);
+    var c = F.sh[0].xyz;
+    c += F.sh[1].xyz * y + F.sh[2].xyz * z + F.sh[3].xyz * x;
+    c += F.sh[4].xyz * (x * y) + F.sh[5].xyz * (y * z);
+    c += F.sh[6].xyz * (3.0 * z * z - 1.0) + F.sh[7].xyz * (x * z);
+    c += F.sh[8].xyz * (x * x - y * y);
     return max(c, vec3f(0.0));
 }
 
@@ -146,34 +154,32 @@ fn ssao_at(frag: vec4f) -> f32 {
     return textureSampleLevel(ssao_tex, lin, uv, 0.0).r;
 }
 
-fn d_ggx(nh: f32, a: f32) -> f32 {
-    let a2 = a * a;
+fn d_ggx(nh: f32, a2: f32) -> f32 {
     let d = nh * nh * (a2 - 1.0) + 1.0;
     return a2 / (PI * d * d);
 }
 
-fn v_smith(nv: f32, nl: f32, a: f32) -> f32 {
-    let a2 = a * a;
-    let gv = nl * sqrt(nv * nv * (1.0 - a2) + a2);
-    let gl = nv * sqrt(nl * nl * (1.0 - a2) + a2);
+fn v_smith(nv: f32, nl: f32, a2: f32) -> f32 {
+    let one_m_a2 = 1.0 - a2;
+    let gv = nl * sqrt(nv * nv * one_m_a2 + a2);
+    let gl = nv * sqrt(nl * nl * one_m_a2 + a2);
     return 0.5 / max(gv + gl, 1e-5);
 }
 
 @fragment
 fn fs_main(i: VOut, @builtin(front_facing) front: bool) -> @location(0) vec4f {
+    let ao = ssao_at(i.clip);
+    if (F.debug.x > 0.5) { return vec4f(vec3f(ao), 1.0); }
     var n = normalize(i.n);
     if (!front) { n = -n; }
     let v = normalize(F.cam_pos.xyz - i.world);
-    let l = normalize(F.light_dir.xyz);
-    let h = normalize(v + l);
+    let l = F.light_dir.xyz;
     let base = O.base_color.rgb * mix(1.0, 0.32, clamp(i.mask, 0.0, 1.0));
     let metal = O.mr.x;
     let rough = clamp(O.mr.y, 0.045, 1.0);
     let a = rough * rough;
     let nv = max(dot(n, v), 1e-4);
-    let nl = max(dot(n, l), 0.0);
-    let nh = max(dot(n, h), 0.0);
-    let vh = max(dot(v, h), 0.0);
+    let nl = dot(n, l);
     let f0 = mix(vec3f(0.04), base, metal);
     let diffuse = base * (1.0 - metal);
 
@@ -182,23 +188,34 @@ fn fs_main(i: VOut, @builtin(front_facing) front: bool) -> @location(0) vec4f {
     let ess = lut.x + lut.y;
     let energy = 1.0 + f0 * (1.0 / max(ess, 1e-3) - 1.0);
 
-    let f = f0 + (1.0 - f0) * pow(1.0 - vh, 5.0);
-    let spec_direct = d_ggx(nh, a) * v_smith(nv, nl, a) * f * energy;
-    let shadow = shadow_at(i.world, n);
-    let direct = (diffuse / PI * (1.0 - f) + spec_direct) * F.light_color.rgb * nl * shadow;
+    var direct = vec3f(0.0);
+    // Skip direct BRDF and 12-tap shadow PCF on surfaces facing away from the key light.
+    if (nl > 0.0) {
+        let h = normalize(v + l);
+        let nh = max(dot(n, h), 0.0);
+        let vh = max(dot(v, h), 0.0);
+        let om = 1.0 - vh;
+        let om2 = om * om;
+        let f = f0 + (1.0 - f0) * (om2 * om2 * om);
+        let a2 = a * a;
+        let spec_direct = d_ggx(nh, a2) * v_smith(nv, nl, a2) * f * energy;
+        let shadow = shadow_at(i.world, n);
+        direct = (diffuse * (1.0 / PI) * (1.0 - f) + spec_direct) * F.light_color.rgb * (nl * shadow);
+    }
 
-    let ao = ssao_at(i.clip);
-    if (F.debug.x > 0.5) { return vec4f(vec3f(ao), 1.0); }
     let r = reflect(-v, n);
     let pre = textureSampleLevel(env_cube, lin, r, rough * F.params.w).rgb;
     // Horizon occlusion: reflections that point into the surface fade out.
     let horizon = clamp(1.0 + dot(r, n), 0.0, 1.0);
-    let spec_ibl = pre * (f0 * lut.x + lut.y) * energy * horizon * horizon;
+    let spec_ibl = pre * (f0 * lut.x + lut.y) * energy * (horizon * horizon);
     let ambient = (diffuse * sh_irradiance(n) + spec_ibl) * ao;
 
     var c = direct + ambient;
     // Selection highlight: a soft fresnel rim in Sculptor's accent orange.
-    c += vec3f(1.0, 0.45, 0.1) * O.mr.z * pow(1.0 - nv, 3.0) * 0.6;
+    if (O.mr.z > 0.0) {
+        let om = 1.0 - nv;
+        c += vec3f(1.0, 0.45, 0.1) * O.mr.z * (om * om * om * 0.6);
+    }
     return vec4f(c, 1.0);
 }
 

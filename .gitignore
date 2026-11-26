@@ -4,3 +4,4 @@ target/
 .DS_Store
 /web/pkg/
 /apple/SculptEngine.xcframework/
+/android/jniLibs/

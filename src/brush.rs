@@ -642,4 +642,16 @@ mod tests {
         assert!((r_px - r_py).abs() < 1e-3, "{r_px} vs {r_py}");
         assert!((r_px - r_ny).abs() < 1e-3, "{r_px} vs {r_ny}");
     }
+
+    #[test]
+    fn zero_radius_and_degenerate_params_are_safe() {
+        let mut m = SculptMesh::from_mesh(&grid(8));
+        let before = m.positions.clone();
+        let moved = run(&mut m, Vec3::ZERO, params(BrushKind::Draw, 0.0, 1.0));
+        assert!(moved.is_empty());
+        assert_eq!(m.positions, before);
+        let moved_neg = run(&mut m, Vec3::ZERO, params(BrushKind::Clay, -2.0, 1.0));
+        assert!(moved_neg.is_empty());
+        assert_eq!(m.positions, before);
+    }
 }

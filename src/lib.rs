@@ -6,8 +6,10 @@ pub mod bvh;
 pub mod camera;
 pub mod draw3d;
 pub mod format;
+pub mod img3d;
 pub mod mesh;
 pub mod remesh;
+pub mod splat;
 pub mod text3d;
 #[cfg(feature = "render")]
 pub mod render;

@@ -461,6 +461,123 @@ pub fn program_schema() -> String {
     crate::text3d::host::program_schema()
 }
 
+/// On-device free Image-to-3D reconstruction (RGBA8 + optional depth map -> text3d-compatible JSON).
+#[uniffi::export]
+pub fn image_to_3d(width: u32, height: u32, rgba: Vec<u8>, depth: Vec<f32>, options_json: String) -> String {
+    let depth_opt = if depth.is_empty() { None } else { Some(depth.as_slice()) };
+    crate::img3d::image_to_3d_json(width, height, &rgba, depth_opt, &options_json)
+}
+
+/// Result returned by prompt-based Gaussian Splat editing across Swift/Kotlin FFI.
+#[derive(uniffi::Record)]
+pub struct SplatEditRecord {
+    pub splat_bytes: Vec<u8>,
+    pub summary: String,
+    pub count: u32,
+    pub modified: u32,
+}
+
+/// On-device Image-to-Gaussian-Splat (items when `is_space == false`, walkable spaces when `is_space == true`).
+/// Returns standard 32-byte-per-Gaussian `.splat` bytes.
+#[uniffi::export]
+pub fn image_to_splat(
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+    depth: Vec<f32>,
+    is_space: bool,
+    max_splats: u32,
+) -> Result<Vec<u8>, EngineError> {
+    let depth_opt = if depth.is_empty() { None } else { Some(depth.as_slice()) };
+    let cloud = crate::splat::image_to_splat(width, height, &rgba, depth_opt, is_space, max_splats as usize)
+        .map_err(EngineError::Invalid)?;
+    Ok(cloud.to_splat_bytes())
+}
+
+/// Converts any triangle mesh (single object OR captured ARKit/visionOS room mesh) into 3D Gaussian Splats.
+#[uniffi::export]
+pub fn mesh_to_splat(
+    positions: Vec<f32>,
+    indices: Vec<u32>,
+    vertex_colors: Vec<f32>,
+    fallback_rgba: Vec<f32>,
+    is_space: bool,
+    max_splats: u32,
+) -> Result<Vec<u8>, EngineError> {
+    let vc = if vertex_colors.is_empty() { None } else { Some(vertex_colors.as_slice()) };
+    let fb = if fallback_rgba.len() >= 4 {
+        [fallback_rgba[0], fallback_rgba[1], fallback_rgba[2], fallback_rgba[3]]
+    } else {
+        [0.8, 0.8, 0.8, 1.0]
+    };
+    let cloud = crate::splat::mesh_to_splat(&positions, &indices, vc, fb, is_space, max_splats as usize)
+        .map_err(EngineError::Invalid)?;
+    Ok(cloud.to_splat_bytes())
+}
+
+/// Edits an item or captured space Gaussian Splat cloud using a natural-language prompt.
+#[uniffi::export]
+pub fn edit_splat_prompt(splat_bytes: Vec<u8>, prompt: String) -> Result<SplatEditRecord, EngineError> {
+    let mut cloud = crate::splat::SplatCloud::from_splat_bytes(&splat_bytes).map_err(EngineError::Format)?;
+    let (summary, modified) = crate::splat::edit_splat_in_place(&mut cloud, &prompt);
+    let count = cloud.len() as u32;
+    Ok(SplatEditRecord {
+        splat_bytes: cloud.to_splat_bytes(),
+        summary,
+        count,
+        modified: modified as u32,
+    })
+}
+
+/// Converts compact `.splat` bytes to standard 3DGS binary `.ply` bytes.
+#[uniffi::export]
+pub fn splat_to_ply(splat_bytes: Vec<u8>) -> Result<Vec<u8>, EngineError> {
+    let cloud = crate::splat::SplatCloud::from_splat_bytes(&splat_bytes).map_err(EngineError::Format)?;
+    Ok(cloud.to_ply_bytes())
+}
+
+/// Imports standard 3DGS `.ply` (binary little-endian or ASCII) into compact `.splat` bytes.
+#[uniffi::export]
+pub fn ply_to_splat(ply_bytes: Vec<u8>) -> Result<Vec<u8>, EngineError> {
+    let cloud = crate::splat::SplatCloud::from_ply_bytes(&ply_bytes).map_err(EngineError::Format)?;
+    Ok(cloud.to_splat_bytes())
+}
+
+/// Packs `.splat` (32 B/splat) into ultra-compact `.dsplat` v2 (12 B/splat, 2.67x smaller than .splat).
+#[uniffi::export]
+pub fn splat_to_compact(splat_bytes: Vec<u8>) -> Result<Vec<u8>, EngineError> {
+    let cloud = crate::splat::SplatCloud::from_splat_bytes(&splat_bytes).map_err(EngineError::Format)?;
+    Ok(cloud.to_compact_bytes())
+}
+
+/// Unpacks `.dsplat` (v2 12 B/splat or v1 16 B/splat) back to standard `.splat` (32 B/splat).
+#[uniffi::export]
+pub fn compact_to_splat(compact_bytes: Vec<u8>) -> Result<Vec<u8>, EngineError> {
+    let cloud = crate::splat::SplatCloud::from_compact_bytes(&compact_bytes).map_err(EngineError::Format)?;
+    Ok(cloud.to_splat_bytes())
+}
+
+/// Returns JSON statistics (`count`, `boundsMin`, `boundsMax`, `center`, `size`, `avgOpacity`, `splatBytes`).
+#[uniffi::export]
+pub fn splat_stats(splat_bytes: Vec<u8>) -> Result<String, EngineError> {
+    let cloud = crate::splat::SplatCloud::from_splat_bytes(&splat_bytes).map_err(EngineError::Format)?;
+    Ok(cloud.stats_json())
+}
+
+/// Fast O(N) radix sort of splats back-to-front relative to a camera position and forward vector.
+#[uniffi::export]
+pub fn sort_splats(splat_bytes: Vec<u8>, cam_pos: Vec<f32>, cam_forward: Vec<f32>) -> Result<Vec<u32>, EngineError> {
+    if cam_pos.len() != 3 || cam_forward.len() != 3 {
+        return Err(EngineError::Invalid("cam_pos and cam_forward must have 3 floats".into()));
+    }
+    let cloud = crate::splat::SplatCloud::from_splat_bytes(&splat_bytes).map_err(EngineError::Format)?;
+    Ok(crate::splat::sort_splats_by_camera(
+        &cloud,
+        [cam_pos[0], cam_pos[1], cam_pos[2]],
+        [cam_forward[0], cam_forward[1], cam_forward[2]],
+    ))
+}
+
 /// Draw in 3D free function: builds a watertight tube/ribbon `SceneCommand.addMesh` JSON from
 /// flat `[x, y, z, radius, ...]` samples and options JSON.
 #[uniffi::export]

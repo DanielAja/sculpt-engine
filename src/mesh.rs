@@ -18,20 +18,294 @@ impl Csr {
     pub fn row(&self, i: usize) -> &[u32] {
         &self.items[self.start[i] as usize..self.start[i + 1] as usize]
     }
-    fn from_rows(n: usize, mut each: impl FnMut(&mut dyn FnMut(usize, u32))) -> Csr {
-        let mut count = vec![0u32; n + 1];
-        each(&mut |r, _| count[r + 1] += 1);
-        for i in 0..n {
-            count[i + 1] += count[i];
-        }
-        let mut fill = count.clone();
-        let mut items = vec![0u32; count[n] as usize];
-        each(&mut |r, v| {
-            items[fill[r] as usize] = v;
-            fill[r] += 1;
+    /// Rows of the faces with at least three corners, in order.
+    fn from_faces(faces: &[Vec<u32>]) -> Csr {
+        const CH: usize = 32768;
+        let counts = collect_chunks(faces.len(), CH, |_, r| {
+            let (mut polys, mut items) = (0usize, 0usize);
+            for f in &faces[r] {
+                if f.len() >= 3 {
+                    polys += 1;
+                    items += f.len();
+                }
+            }
+            (polys, items)
         });
-        Csr { start: count, items }
+        let mut offsets = Vec::with_capacity(counts.len());
+        let (mut p, mut it) = (0usize, 0usize);
+        for &(np, ni) in &counts {
+            offsets.push((p, it));
+            p += np;
+            it += ni;
+        }
+        let mut start = Vec::with_capacity(p + 1);
+        let mut items = Vec::with_capacity(it);
+        // SAFETY: `u32` is Copy; `start[0..=p]` and `items[0..it]` are completely written below before any read.
+        unsafe {
+            start.set_len(p + 1);
+            items.set_len(it);
+        }
+        start[p] = it as u32;
+        let (sp, ip) = (SyncPtr(start.as_mut_ptr()), SyncPtr(items.as_mut_ptr()));
+        run_chunks(faces.len(), CH, |c, r| {
+            let (mut p, mut it) = offsets[c];
+            for f in &faces[r] {
+                let len = f.len();
+                if len >= 3 {
+                    // SAFETY: chunk `c` owns poly slots `offsets[c].0..` and item slots `offsets[c].1..`, which the
+                    // counting pass sized exactly; no other chunk writes there.
+                    unsafe {
+                        sp.add(p).write(it as u32);
+                        match f.as_slice() {
+                            [a, b, c, d] => (ip.add(it) as *mut [u32; 4]).write([*a, *b, *c, *d]),
+                            [a, b, c] => (ip.add(it) as *mut [u32; 3]).write([*a, *b, *c]),
+                            s => std::ptr::copy_nonoverlapping(s.as_ptr(), ip.add(it), len),
+                        }
+                    }
+                    p += 1;
+                    it += len;
+                }
+            }
+        });
+        Csr { start, items }
     }
+}
+
+/// Raw pointer that may cross threads; every use writes disjoint elements.
+struct SyncPtr<T>(*mut T);
+impl<T> Clone for SyncPtr<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<T> Copy for SyncPtr<T> {}
+impl<T> SyncPtr<T> {
+    #[inline(always)]
+    fn add(self, i: usize) -> *mut T {
+        // SAFETY: callers stay inside the allocation the pointer came from.
+        unsafe { self.0.add(i) }
+    }
+}
+unsafe impl<T> Send for SyncPtr<T> {}
+unsafe impl<T> Sync for SyncPtr<T> {}
+
+/// Runs `f(chunk_index, item_range)` over `0..n` in `chunk` sized pieces (in parallel for big inputs).
+fn run_chunks(n: usize, chunk: usize, f: impl Fn(usize, std::ops::Range<usize>) + Sync + Send) {
+    let nc = n.div_ceil(chunk);
+    #[cfg(feature = "threads")]
+    if n >= PAR_MIN {
+        use rayon::prelude::*;
+        (0..nc).into_par_iter().for_each(|c| f(c, c * chunk..((c + 1) * chunk).min(n)));
+        return;
+    }
+    for c in 0..nc {
+        f(c, c * chunk..((c + 1) * chunk).min(n));
+    }
+}
+
+/// Like [`run_chunks`], returning one result per chunk in order.
+fn collect_chunks<T: Send>(n: usize, chunk: usize, f: impl Fn(usize, std::ops::Range<usize>) -> T + Sync + Send) -> Vec<T> {
+    let nc = n.div_ceil(chunk);
+    #[cfg(feature = "threads")]
+    if n >= PAR_MIN {
+        use rayon::prelude::*;
+        return (0..nc).into_par_iter().map(|c| f(c, c * chunk..((c + 1) * chunk).min(n))).collect();
+    }
+    (0..nc).map(|c| f(c, c * chunk..((c + 1) * chunk).min(n))).collect()
+}
+
+/// Items from which work is spread over the thread pool.
+#[cfg(feature = "threads")]
+const PAR_MIN: usize = 65_536;
+
+#[inline]
+fn join2<A: Send, B: Send>(a: impl FnOnce() -> A + Send, b: impl FnOnce() -> B + Send) -> (A, B) {
+    #[cfg(feature = "threads")]
+    {
+        rayon::join(a, b)
+    }
+    #[cfg(not(feature = "threads"))]
+    {
+        (a(), b())
+    }
+}
+
+/// Polys touching each vertex, ascending poly order within a row.
+fn build_vertex_polys(n: usize, polys: &Csr) -> Csr {
+    let pc = polys.start.len() - 1;
+    let total = polys.items.len();
+    #[cfg(feature = "threads")]
+    if pc >= PAR_MIN && n > 0 && n <= 4_000_000 {
+        use rayon::prelude::*;
+        // Partition polys across chunks: each chunk builds its own vertex histogram and scatters
+        // its poly IDs in ascending order, avoiding atomic contention and per-vertex row sorting.
+        let t = rayon::current_num_threads().clamp(2, 4);
+        let chunk = pc.div_ceil(t);
+        let chunks: Vec<std::ops::Range<usize>> = (0..t)
+            .map(|c| c * chunk..((c + 1) * chunk).min(pc))
+            .filter(|r| !r.is_empty())
+            .collect();
+        let mut counts: Vec<Vec<u32>> = chunks
+            .par_iter()
+            .map(|r| {
+                let mut cnt = vec![0u32; n];
+                let s0 = polys.start[r.start] as usize;
+                let s1 = polys.start[r.end] as usize;
+                for &v in &polys.items[s0..s1] {
+                    cnt[v as usize] += 1;
+                }
+                cnt
+            })
+            .collect();
+        let mut start = Vec::with_capacity(n + 1);
+        // SAFETY: `u32` is Copy; every element `0..=n` is written in the prefix-sum loop below.
+        unsafe { start.set_len(n + 1); }
+        let mut acc = 0u32;
+        for v in 0..n {
+            start[v] = acc;
+            for c in &mut counts {
+                let d = c[v];
+                c[v] = acc;
+                acc += d;
+            }
+        }
+        start[n] = acc;
+        let mut items: Vec<u32> = Vec::with_capacity(total);
+        // SAFETY: `u32` is Copy; every slot in `0..total` belongs to one `(chunk, poly, vertex)`
+        // and is written exactly once below.
+        unsafe { items.set_len(total); }
+        let dst = SyncPtr(items.as_mut_ptr());
+        chunks.into_par_iter().zip(counts.into_par_iter()).for_each(|(r, mut off)| {
+            for p in r {
+                let pu = p as u32;
+                for &v in polys.row(p) {
+                    let slot = &mut off[v as usize];
+                    // SAFETY: `off[v]` ranges over chunk's disjoint slice within vertex `v`'s row.
+                    unsafe { dst.add(*slot as usize).write(pu) };
+                    *slot += 1;
+                }
+            }
+        });
+        return Csr { start, items };
+    }
+    let mut start = vec![0u32; n + 1];
+    for &v in &polys.items {
+        start[v as usize + 1] += 1;
+    }
+    for i in 0..n {
+        start[i + 1] += start[i];
+    }
+    let mut items = Vec::with_capacity(total);
+    // SAFETY: `u32` is Copy; every slot in `0..total` is written in the scatter loop below.
+    unsafe { items.set_len(total); }
+    for p in 0..pc {
+        let pu = p as u32;
+        for &v in polys.row(p) {
+            let slot = &mut start[v as usize];
+            items[*slot as usize] = pu;
+            *slot += 1;
+        }
+    }
+    if n > 0 {
+        start.copy_within(0..n, 1);
+        start[0] = 0;
+    }
+    Csr { start, items }
+}
+
+/// Edge neighbours through poly edges (not fan diagonals), sorted and unique per vertex.
+fn build_neighbours(n: usize, polys: &Csr, vertex_polys: &Csr) -> Csr {
+    let parts = collect_chunks(n, 32768, |_, r| {
+        let mut lens = Vec::with_capacity(r.len());
+        let mut items: Vec<u32> = Vec::with_capacity(r.len() * 8 + 64);
+        for v in r {
+            let vu = v as u32;
+            let s = items.len();
+            for &p in vertex_polys.row(v) {
+                let row = polys.row(p as usize);
+                match row {
+                    &[a, b, c, d] => {
+                        if a == vu { items.push(d); items.push(b); }
+                        if b == vu { items.push(a); items.push(c); }
+                        if c == vu { items.push(b); items.push(d); }
+                        if d == vu { items.push(c); items.push(a); }
+                    }
+                    &[a, b, c] => {
+                        if a == vu { items.push(c); items.push(b); }
+                        if b == vu { items.push(a); items.push(c); }
+                        if c == vu { items.push(b); items.push(a); }
+                    }
+                    _ => {
+                        let m = row.len();
+                        for i in 0..m {
+                            if row[i] == vu {
+                                items.push(row[if i == 0 { m - 1 } else { i - 1 }]);
+                                items.push(row[if i + 1 == m { 0 } else { i + 1 }]);
+                            }
+                        }
+                    }
+                }
+            }
+            let len = items.len() - s;
+            if len > 1 {
+                let row = &mut items[s..];
+                if len <= 16 {
+                    // Insertion sort avoids pdqsort overhead for typical degree 4..8 vertices.
+                    for i in 1..len {
+                        let key = row[i];
+                        let mut j = i;
+                        while j > 0 && row[j - 1] > key {
+                            row[j] = row[j - 1];
+                            j -= 1;
+                        }
+                        row[j] = key;
+                    }
+                } else {
+                    row.sort_unstable();
+                }
+                let mut w = s + 1;
+                for k in s + 1..items.len() {
+                    if items[k] != items[w - 1] {
+                        items[w] = items[k];
+                        w += 1;
+                    }
+                }
+                items.truncate(w);
+            }
+            lens.push((items.len() - s) as u32);
+        }
+        (lens, items)
+    });
+    let mut start = Vec::with_capacity(n + 1);
+    start.push(0u32);
+    let mut offsets = Vec::with_capacity(parts.len());
+    let mut total = 0usize;
+    let mut acc = 0u32;
+    for (lens, items) in &parts {
+        offsets.push(total);
+        for &l in lens {
+            acc += l;
+            start.push(acc);
+        }
+        total += items.len();
+    }
+    let mut items = Vec::with_capacity(total);
+    // SAFETY: `u32` is Copy; every chunk fills its disjoint slice of `items[0..total]` below.
+    unsafe { items.set_len(total); }
+    let dst = SyncPtr(items.as_mut_ptr());
+    let copy = |c: usize| {
+        let src = &parts[c].1;
+        // SAFETY: chunk `c` fills `offsets[c]..offsets[c] + src.len()` only.
+        unsafe { std::ptr::copy_nonoverlapping(src.as_ptr(), dst.add(offsets[c]), src.len()) };
+    };
+    #[cfg(feature = "threads")]
+    if n >= PAR_MIN {
+        use rayon::prelude::*;
+        (0..parts.len()).into_par_iter().for_each(copy);
+        return Csr { start, items };
+    }
+    (0..parts.len()).for_each(copy);
+    Csr { start, items }
 }
 
 #[derive(Debug, Clone)]
@@ -56,17 +330,13 @@ pub struct SculptMesh {
 impl SculptMesh {
     pub fn from_mesh(m: &Mesh) -> SculptMesh {
         let n = m.positions.len();
-        let fc = m.faces.iter().filter(|f| f.len() >= 3).count();
-        let polys = Csr::from_rows(fc, |push| {
-            for (fi, f) in m.faces.iter().filter(|f| f.len() >= 3).enumerate() {
-                for &v in f.iter() {
-                    push(fi, v);
-                }
-            }
-        });
+        let polys = Csr::from_faces(&m.faces);
+        let mut normals = Vec::with_capacity(n);
+        // SAFETY: `Vec3` is Copy; `rebuild_topology` writes all `n` elements of `normals` before reading.
+        unsafe { normals.set_len(n); }
         let mut out = SculptMesh {
             positions: m.positions.clone(),
-            normals: vec![Vec3::ZERO; n],
+            normals,
             masks: vec![0.0; n],
             polys,
             tris: Vec::new(),
@@ -121,111 +391,95 @@ impl SculptMesh {
     pub fn rebuild_topology(&mut self) {
         let n = self.positions.len();
         let pc = self.poly_count();
-        self.tris.clear();
-        self.tris.reserve(self.polys.items.len().saturating_sub(2 * pc));
-        for p in 0..pc {
-            let r = self.polys.row(p);
-            for k in 1..r.len() - 1 {
-                self.tris.push([r[0], r[k], r[k + 1]]);
-            }
-        }
         let polys = &self.polys;
-        self.vertex_polys = Csr::from_rows(n, |push| {
-            for p in 0..pc {
-                for &v in polys.row(p) {
-                    push(v as usize, p as u32);
-                }
-            }
-        });
-        let mut nb = Csr::from_rows(n, |push| {
-            for p in 0..pc {
-                let r = polys.row(p);
-                let mut prev = r[r.len() - 1];
-                for &cur in r {
-                    push(prev as usize, cur);
-                    push(cur as usize, prev);
-                    prev = cur;
-                }
-            }
-        });
-        // Sort and dedupe each row in place (shared edges appear twice).
-        let mut start = Vec::with_capacity(n + 1);
-        start.push(0u32);
-        let mut write = 0usize;
-        for v in 0..n {
-            let s = nb.start[v] as usize;
-            let e = nb.start[v + 1] as usize;
-            let len = e - s;
-            if len > 1 {
-                let row = &mut nb.items[s..e];
-                if len <= 16 {
-                    // Insertion sort avoids pdqsort overhead for typical degree 4..8 vertices.
-                    for i in 1..len {
-                        let key = row[i];
-                        let mut j = i;
-                        while j > 0 && row[j - 1] > key {
-                            row[j] = row[j - 1];
-                            j -= 1;
+        let positions = &self.positions;
+        // Fan triangles + Newell vectors only depend on `polys` and `positions`; overlap them with
+        // `vertex_polys` + `neighbours` on the pool before computing per-vertex normals.
+        let ((tris, poly_vec), (vertex_polys, neighbours)) = join2(
+            || {
+                join2(
+                    || {
+                        let counts = collect_chunks(pc, 16384, |_, r| {
+                            r.map(|p| polys.row(p).len().saturating_sub(2)).sum::<usize>()
+                        });
+                        let mut offsets = Vec::with_capacity(counts.len());
+                        let mut total = 0usize;
+                        for &c in &counts {
+                            offsets.push(total);
+                            total += c;
                         }
-                        row[j] = key;
-                    }
-                } else {
-                    row.sort_unstable();
-                }
-            }
-            let mut last = u32::MAX;
-            for k in s..e {
-                let x = nb.items[k];
-                if x != last {
-                    nb.items[write] = x;
-                    write += 1;
-                    last = x;
-                }
-            }
-            start.push(write as u32);
+                        let mut tris: Vec<[u32; 3]> = Vec::with_capacity(total);
+                        // SAFETY: `[u32; 3]` is Copy; every chunk fills its disjoint `counts[c]` slots.
+                        unsafe { tris.set_len(total); }
+                        let dst = SyncPtr(tris.as_mut_ptr());
+                        run_chunks(pc, 16384, |c, r| {
+                            let mut at = offsets[c];
+                            for p in r {
+                                let row = polys.row(p);
+                                match row {
+                                    &[a, b, c, d] => {
+                                        // SAFETY: chunk `c` owns `offsets[c]..offsets[c] + counts[c]`.
+                                        unsafe {
+                                            dst.add(at).write([a, b, c]);
+                                            dst.add(at + 1).write([a, c, d]);
+                                        }
+                                        at += 2;
+                                    }
+                                    &[a, b, c] => {
+                                        unsafe { dst.add(at).write([a, b, c]) };
+                                        at += 1;
+                                    }
+                                    _ => {
+                                        for k in 1..row.len().saturating_sub(1) {
+                                            unsafe { dst.add(at).write([row[0], row[k], row[k + 1]]) };
+                                            at += 1;
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                        tris
+                    },
+                    || {
+                        #[cfg(feature = "threads")]
+                        if pc >= PAR_MIN {
+                            use rayon::prelude::*;
+                            return (0..pc)
+                                .into_par_iter()
+                                .with_min_len(4096)
+                                .map(|p| newell_poly(positions, polys.row(p)))
+                                .collect();
+                        }
+                        (0..pc).map(|p| newell_poly(positions, polys.row(p))).collect()
+                    },
+                )
+            },
+            || {
+                let vp = build_vertex_polys(n, polys);
+                let nb = build_neighbours(n, polys, &vp);
+                (vp, nb)
+            },
+        );
+        self.tris = tris;
+        self.poly_vec = poly_vec;
+        self.vertex_polys = vertex_polys;
+        self.neighbours = neighbours;
+        if self.normals.len() != n {
+            self.normals.resize(n, Vec3::ZERO);
         }
-        nb.items.truncate(write);
-        self.neighbours = Csr { start, items: nb.items };
         #[cfg(feature = "threads")]
-        {
+        if n >= PAR_MIN {
             use rayon::prelude::*;
-            if pc >= 4096 {
-                let positions = &self.positions;
-                let polys = &self.polys;
-                self.poly_vec = (0..pc)
-                    .into_par_iter()
-                    .with_min_len(1024)
-                    .map(|p| newell_poly(positions, polys.row(p)))
-                    .collect();
-            } else {
-                self.poly_vec = (0..pc).map(|p| self.newell(p)).collect();
-            }
-            if n >= 4096 {
-                let vertex_polys = &self.vertex_polys;
-                let poly_vec = &self.poly_vec;
-                self.normals.resize(n, Vec3::ZERO);
-                self.normals.par_iter_mut().enumerate().with_min_len(1024).for_each(|(v, dst)| {
-                    *dst = vertex_normal_raw(vertex_polys.row(v), poly_vec);
-                });
-            } else {
-                for v in 0..n {
-                    self.normals[v] = self.vertex_normal(v);
-                }
-            }
+            let vertex_polys = &self.vertex_polys;
+            let poly_vec = &self.poly_vec;
+            self.normals.par_iter_mut().enumerate().with_min_len(4096).for_each(|(v, dst)| {
+                *dst = vertex_normal_raw(vertex_polys.row(v), poly_vec);
+            });
+            return;
         }
-        #[cfg(not(feature = "threads"))]
-        {
-            self.poly_vec = (0..pc).map(|p| self.newell(p)).collect();
-            for v in 0..n {
-                self.normals[v] = self.vertex_normal(v);
-            }
+        for v in 0..n {
+            self.normals[v] = self.vertex_normal(v);
         }
-    }
-
-    /// Newell's method, written exactly as Sculptor's `Mesh.newellVector`.
-    #[inline]
-    fn newell(&self, p: usize) -> Vec3 {
-        newell_poly(&self.positions, self.polys.row(p))
     }
 
     #[inline]
@@ -258,8 +512,9 @@ impl SculptMesh {
                 let pm = &mut poly_stamp.marks[p as usize];
                 if *pm != ptag {
                     *pm = ptag;
-                    self.poly_vec[p as usize] = newell_poly(&self.positions, self.polys.row(p as usize));
-                    for &u in self.polys.row(p as usize) {
+                    let row = self.polys.row(p as usize);
+                    self.poly_vec[p as usize] = newell_poly(&self.positions, row);
+                    for &u in row {
                         let vm = &mut vert_stamp.marks[u as usize];
                         if *vm != vtag {
                             *vm = vtag;
@@ -270,6 +525,22 @@ impl SculptMesh {
             }
         }
         let touched = &out_verts[start_len..];
+        #[cfg(feature = "threads")]
+        if touched.len() >= PAR_MIN {
+            use rayon::prelude::*;
+            let vertex_polys = &self.vertex_polys;
+            let poly_vec = &self.poly_vec;
+            let nrms = SyncPtr(self.normals.as_mut_ptr());
+            touched.par_chunks(4096).for_each(|chunk| {
+                for &v in chunk {
+                    // SAFETY: `vert_stamp` guarantees every vertex in `touched` is unique.
+                    unsafe {
+                        nrms.add(v as usize).write(vertex_normal_raw(vertex_polys.row(v as usize), poly_vec));
+                    }
+                }
+            });
+            return;
+        }
         for &v in touched {
             self.normals[v as usize] = vertex_normal_raw(self.vertex_polys.row(v as usize), &self.poly_vec);
         }
@@ -286,24 +557,26 @@ impl SculptMesh {
         polys.dedup();
         let mut verts = Vec::with_capacity(polys.len() * 4);
         for &p in &polys {
-            self.poly_vec[p as usize] = self.newell(p as usize);
-            verts.extend_from_slice(self.polys.row(p as usize));
+            let row = self.polys.row(p as usize);
+            self.poly_vec[p as usize] = newell_poly(&self.positions, row);
+            verts.extend_from_slice(row);
         }
         verts.sort_unstable();
         verts.dedup();
         #[cfg(feature = "threads")]
-        if verts.len() >= 4096 {
+        if verts.len() >= PAR_MIN {
             use rayon::prelude::*;
             let vertex_polys = &self.vertex_polys;
             let poly_vec = &self.poly_vec;
-            let new_nrms: Vec<Vec3> = verts
-                .par_iter()
-                .with_min_len(1024)
-                .map(|&v| vertex_normal_raw(vertex_polys.row(v as usize), poly_vec))
-                .collect();
-            for (&v, n) in verts.iter().zip(new_nrms) {
-                self.normals[v as usize] = n;
-            }
+            let nrms = SyncPtr(self.normals.as_mut_ptr());
+            verts.par_chunks(4096).for_each(|chunk| {
+                for &v in chunk {
+                    // SAFETY: `verts` was deduped, so every chunk writes disjoint elements of `normals`.
+                    unsafe {
+                        nrms.add(v as usize).write(vertex_normal_raw(vertex_polys.row(v as usize), poly_vec));
+                    }
+                }
+            });
             return verts;
         }
         for &v in &verts {
@@ -350,24 +623,47 @@ impl SculptMesh {
 
 #[inline]
 fn newell_poly(positions: &[Vec3], r: &[u32]) -> Vec3 {
-    let mut n = Vec3::ZERO;
-    let mut a = positions[r[r.len() - 1] as usize];
-    for &idx in r {
-        let b = positions[idx as usize];
-        n.x += (a.y - b.y) * (a.z + b.z);
-        n.y += (a.z - b.z) * (a.x + b.x);
-        n.z += (a.x - b.x) * (a.y + b.y);
-        a = b;
+    match r {
+        &[i0, i1, i2] => {
+            let p0 = positions[i0 as usize];
+            (positions[i1 as usize] - p0).cross(positions[i2 as usize] - p0)
+        }
+        &[i0, i1, i2, i3] => {
+            let d02 = positions[i2 as usize] - positions[i0 as usize];
+            let d13 = positions[i3 as usize] - positions[i1 as usize];
+            d02.cross(d13)
+        }
+        _ => {
+            let mut n = Vec3::ZERO;
+            let mut a = positions[r[r.len() - 1] as usize];
+            for &idx in r {
+                let b = positions[idx as usize];
+                n.x += (a.y - b.y) * (a.z + b.z);
+                n.y += (a.z - b.z) * (a.x + b.x);
+                n.z += (a.x - b.x) * (a.y + b.y);
+                a = b;
+            }
+            n
+        }
     }
-    n
 }
 
 #[inline]
 fn vertex_normal_raw(polys: &[u32], poly_vec: &[Vec3]) -> Vec3 {
-    let mut s = Vec3::ZERO;
-    for &p in polys {
-        s += poly_vec[p as usize];
-    }
+    let s = match polys {
+        &[p0, p1, p2, p3] => {
+            (poly_vec[p0 as usize] + poly_vec[p1 as usize])
+                + (poly_vec[p2 as usize] + poly_vec[p3 as usize])
+        }
+        &[p0, p1, p2] => poly_vec[p0 as usize] + poly_vec[p1 as usize] + poly_vec[p2 as usize],
+        _ => {
+            let mut acc = Vec3::ZERO;
+            for &p in polys {
+                acc += poly_vec[p as usize];
+            }
+            acc
+        }
+    };
     s.normalize_or_zero()
 }
 
@@ -402,6 +698,37 @@ pub fn uv_sphere(r: f32, segments: u32, rings: u32) -> Mesh {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Chunked / parallel topology builders against a plain sets-and-loops reference.
+    #[test]
+    fn topology_matches_naive_reference() {
+        for (seg, rings) in [(5, 3), (24, 12), (120, 90)] {
+            let mut m = uv_sphere(5.0, seg, rings);
+            m.faces.insert(3, vec![0, 1]); // too short: dropped
+            let sm = SculptMesh::from_mesh(&m);
+            let faces: Vec<&Vec<u32>> = m.faces.iter().filter(|f| f.len() >= 3).collect();
+            assert_eq!(sm.poly_count(), faces.len());
+            let mut tris = Vec::new();
+            let mut vp = vec![Vec::new(); m.positions.len()];
+            let mut nb = vec![std::collections::BTreeSet::new(); m.positions.len()];
+            for (p, f) in faces.iter().enumerate() {
+                assert_eq!(sm.polys.row(p), &f[..]);
+                for k in 1..f.len() - 1 {
+                    tris.push([f[0], f[k], f[k + 1]]);
+                }
+                for (i, &v) in f.iter().enumerate() {
+                    vp[v as usize].push(p as u32);
+                    nb[v as usize].insert(f[(i + 1) % f.len()]);
+                    nb[f[(i + 1) % f.len()] as usize].insert(v);
+                }
+            }
+            assert_eq!(sm.tris, tris);
+            for v in 0..m.positions.len() {
+                assert_eq!(sm.vertex_polys.row(v), &vp[v][..], "vertex_polys {v}");
+                assert_eq!(sm.neighbours.row(v), &nb[v].iter().copied().collect::<Vec<_>>()[..], "neighbours {v}");
+            }
+        }
+    }
 
     fn cube() -> Mesh {
         let p = |x: f32, y: f32, z: f32| Vec3::new(x, y, z) * 10.0;

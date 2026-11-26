@@ -97,7 +97,7 @@ impl SculptTarget {
 
         let mut stamp = crate::bvh::Stamp::new(self.mesh.positions.len());
         let mut hits = Vec::new();
-        let mut accum: std::collections::HashMap<u32, (Vec3, Mat3)> = std::collections::HashMap::new();
+        let mut accum: std::collections::HashMap<u32, (Vec3, Mat3, f32)> = std::collections::HashMap::new();
         for (sym_c, sym_mat) in syms {
             self.bvh.sphere_vertices(&self.mesh.positions, &self.mesh.tris, sym_c, r, &mut stamp, &mut hits);
             for &v in &hits {
@@ -107,12 +107,20 @@ impl SculptTarget {
                 let mask_unprotected = (1.0 - self.mesh.masks.get(v as usize).copied().unwrap_or(0.0)).clamp(0.0, 1.0);
                 let w = f * mask_unprotected * abs_st;
                 if w > 1e-6 {
-                    let entry = accum.entry(v).or_insert((pos, Mat3::ZERO));
+                    let entry = accum.entry(v).or_insert((pos, Mat3::ZERO, 0.0));
                     entry.1 += sym_mat * w;
+                    entry.2 += w;
                 }
             }
         }
-        let mut entries: Vec<(u32, Vec3, Mat3)> = accum.into_iter().map(|(v, (p, m))| (v, p, m)).collect();
+        let mut entries: Vec<(u32, Vec3, Mat3)> = accum
+            .into_iter()
+            .map(|(v, (p, m, w_sum))| {
+                // Clamp overlapping symmetry/radial weights near symmetry axes so vertices never overshoot 100% drag.
+                let mat = if w_sum > abs_st && w_sum > 1e-6 { m * (abs_st / w_sum) } else { m };
+                (v, p, mat)
+            })
+            .collect();
         entries.sort_unstable_by_key(|e| e.0);
         let mut verts = Vec::with_capacity(entries.len());
         for &(v, p, _) in &entries {
@@ -444,5 +452,42 @@ mod tests {
         let (mesh, cmd) = t.end_stroke().unwrap();
         assert!(mesh.positions != sphere.positions);
         assert!(cmd.contains("\"setMesh\""));
+    }
+
+    #[test]
+    fn grab_with_radial_symmetry_and_mask_keeps_masked_vertices_stationary() {
+        let sphere = uv_sphere(10.0, 32, 16);
+        let mut t = SculptTarget::new("ID", &sphere, Mat4::IDENTITY);
+        // Mask the +Y hemisphere completely, leave +X/-X/-Y unmasked.
+        for (i, pos) in t.mesh.positions.iter().enumerate() {
+            if pos.y > 5.0 {
+                t.mesh.masks[i] = 1.0;
+            }
+        }
+        let p = BrushParams {
+            kind: BrushKind::Grab,
+            radius: 4.0,
+            strength: 1.0,
+            radial_symmetry: 4,
+            ..Default::default()
+        };
+        t.begin_grab(Vec3::new(10.0, 0.0, 0.0), Vec3::NEG_Y, &p);
+        t.move_grab(Vec3::new(3.0, 0.0, 0.0));
+        // Unmasked +X, -X, -Y lobes should all displace outward > 12.0
+        let max_x = t.mesh.positions.iter().map(|q| q.x).fold(f32::NEG_INFINITY, f32::max);
+        let min_x = t.mesh.positions.iter().map(|q| q.x).fold(f32::INFINITY, f32::min);
+        let min_y = t.mesh.positions.iter().map(|q| q.y).fold(f32::INFINITY, f32::min);
+        assert!(max_x > 12.0, "+X unmasked lobe should move: {max_x}");
+        assert!(min_x < -12.0, "-X radial lobe should move: {min_x}");
+        assert!(min_y < -12.0, "-Y radial lobe should move: {min_y}");
+        // Every masked vertex (y > 5.0) MUST stay strictly stationary!
+        for (i, (orig, cur)) in sphere.positions.iter().zip(&t.mesh.positions).enumerate() {
+            if orig.y > 5.0 {
+                assert!(
+                    (*cur - *orig).length() < 1e-6,
+                    "masked vertex {i} at {orig} moved to {cur} during radial Grab!"
+                );
+            }
+        }
     }
 }

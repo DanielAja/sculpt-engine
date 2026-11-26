@@ -36,12 +36,11 @@ fn oct_decode(e: vec2f) -> vec3f {
     return normalize(n);
 }
 
-/// View space position of a full resolution pixel; z = 0 marks the background.
-fn view_pos(px: vec2i, full: vec2f) -> vec3f {
-    let t = textureLoad(pre, px, 0);
+/// View space position of a full resolution pixel from an already-loaded prepass texel; z = 0 marks background.
+fn view_pos_from(px: vec2i, t: vec4f, inv_full: vec2f) -> vec3f {
     let d = t.b + t.a;
     if (d <= 0.0) { return vec3f(0.0); }
-    let uv = (vec2f(px) + 0.5) / full;
+    let uv = (vec2f(px) + 0.5) * inv_full;
     let ndc = vec2f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
     let q = F.inv_proj * vec4f(ndc, 1.0, 1.0);
     let p = q.xyz / q.w;
@@ -49,45 +48,65 @@ fn view_pos(px: vec2i, full: vec2f) -> vec3f {
     return p * (d / -p.z);
 }
 
+fn view_pos(px: vec2i, inv_full: vec2f) -> vec3f {
+    return view_pos_from(px, textureLoad(pre, px, 0), inv_full);
+}
+
 fn hash(p: vec2f) -> f32 {
     return fract(sin(dot(p, vec2f(12.9898, 78.233))) * 43758.5453);
 }
 
+// Precomputed golden-angle hemisphere kernel (cos(phi)*r, sin(phi)*r, z) * scale for 12 SSAO taps;
+// eliminates 24 trig + 12 sqrt calls per half-res fragment.
+const SSAO_KERNEL: array<vec3f, 12> = array<vec3f, 12>(
+    vec3f(0.1473990, 0.0000000, 0.0278125),
+    vec3f(-0.1111195, 0.1017946, 0.0399501),
+    vec3f(0.0143431, -0.1634335, 0.0567853),
+    vec3f(0.1133834, 0.1478884, 0.0808268),
+    vec3f(-0.2126246, -0.0376101, 0.1145833),
+    vec3f(0.2113886, -0.1344685, 0.1605635),
+    vec3f(-0.0745396, 0.2772851, 0.2212760),
+    vec3f(-0.1482020, -0.2853527, 0.2992296),
+    vec3f(0.3267351, 0.1193225, 0.3969329),
+    vec3f(-0.3298772, 0.1361693, 0.5168945),
+    vec3f(0.1407429, -0.3007612, 0.6616233),
+    vec3f(0.0682273, 0.2175175, 0.8336277),
+);
+
 @fragment
 fn fs_ssao(@builtin(position) frag: vec4f) -> @location(0) vec4f {
     let full = F.viewport.xy;
+    let inv_full = F.viewport.zw;
     let px = vec2i(frag.xy * 2.0);
-    let p = view_pos(px, full);
+    let center = textureLoad(pre, px, 0);
+    let p = view_pos_from(px, center, inv_full);
     if (p.z >= 0.0) { return vec4f(1.0); }
-    let n = oct_decode(textureLoad(pre, px, 0).rg);
+    let n = oct_decode(center.rg);
     let radius = F.params2.w;
+    let bias = radius * 0.05;
     // Random rotation per pixel (and per frame while accumulating) around the normal.
     let ang = (hash(frag.xy) + F.jitter.w * 0.618) * 6.2831853;
     var t = normalize(cross(n, select(vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), abs(n.x) > 0.9)));
     let b = cross(n, t);
     t = t * cos(ang) + b * sin(ang);
     let b2 = cross(n, t);
+    let tr = t * radius;
+    let br = b2 * radius;
+    let nr = n * radius;
     var occ = 0.0;
-    let count = 12;
-    for (var k = 0; k < count; k++) {
-        let fk = f32(k);
-        let phi = fk * 2.399963; // golden angle
-        // Keep samples out of the grazing band: on convex surfaces those land behind the surface's own
-        // silhouette and read as occlusion (a hard band across spheres).
-        let z = mix(0.15, 1.0, (fk + 0.5) / f32(count));
-        let r = sqrt(1.0 - z * z);
-        let scale = mix(0.15, 1.0, (fk / f32(count)) * (fk / f32(count)));
-        let dir = (t * cos(phi) * r + b2 * sin(phi) * r + n * z) * radius * scale;
-        let s = p + dir;
+    for (var k = 0; k < 12; k++) {
+        let ks = SSAO_KERNEL[k];
+        let s = p + tr * ks.x + br * ks.y + nr * ks.z;
         let c = F.proj * vec4f(s, 1.0);
-        let suv = vec2f(c.x / c.w * 0.5 + 0.5, 0.5 - c.y / c.w * 0.5);
+        let inv_w = 1.0 / c.w;
+        let suv = vec2f(c.x * inv_w * 0.5 + 0.5, 0.5 - c.y * inv_w * 0.5);
         if (suv.x < 0.0 || suv.x > 1.0 || suv.y < 0.0 || suv.y > 1.0) { continue; }
-        let sp = view_pos(vec2i(suv * full), full);
+        let sp = view_pos(vec2i(suv * full), inv_full);
         if (sp.z >= 0.0) { continue; }
         let range = smoothstep(0.0, 1.0, radius / max(abs(p.z - sp.z), 1e-3));
-        occ += select(0.0, 1.0, sp.z >= s.z + radius * 0.05) * range;
+        occ += select(0.0, 1.0, sp.z >= s.z + bias) * range;
     }
-    return vec4f(1.0 - occ / f32(count));
+    return vec4f(1.0 - occ * (1.0 / 12.0));
 }
 
 @fragment

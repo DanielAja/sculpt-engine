@@ -675,17 +675,37 @@ internal object IntegrityCheckingUniffiLib {
     }
 
     internal fun ensureInitialized() = Unit
+    external fun uniffi_sculpt_engine_checksum_func_compact_to_splat(
+    ): Int
     external fun uniffi_sculpt_engine_checksum_func_draw3d_from_points(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_edit_splat_prompt(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_image_to_3d(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_image_to_splat(
     ): Int
     external fun uniffi_sculpt_engine_checksum_func_mesh_program(
     ): Int
+    external fun uniffi_sculpt_engine_checksum_func_mesh_to_splat(
+    ): Int
     external fun uniffi_sculpt_engine_checksum_func_plan_text(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_ply_to_splat(
     ): Int
     external fun uniffi_sculpt_engine_checksum_func_program_prompt(
     ): Int
     external fun uniffi_sculpt_engine_checksum_func_program_schema(
     ): Int
     external fun uniffi_sculpt_engine_checksum_func_render_snapshot(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_sort_splats(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_splat_stats(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_splat_to_compact(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_splat_to_ply(
     ): Int
     external fun uniffi_sculpt_engine_checksum_func_text_to_3d(
     ): Int
@@ -885,17 +905,37 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_sculpt_engine_fn_method_engineview_zoom(`ptr`: Long,`factor`: Float,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    external fun uniffi_sculpt_engine_fn_func_compact_to_splat(`compactBytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_sculpt_engine_fn_func_draw3d_from_points(`pointsXyzr`: RustBuffer.ByValue,`optionsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_edit_splat_prompt(`splatBytes`: RustBuffer.ByValue,`prompt`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_image_to_3d(`width`: Int,`height`: Int,`rgba`: RustBuffer.ByValue,`depth`: RustBuffer.ByValue,`optionsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_image_to_splat(`width`: Int,`height`: Int,`rgba`: RustBuffer.ByValue,`depth`: RustBuffer.ByValue,`isSpace`: Byte,`maxSplats`: Int,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_sculpt_engine_fn_func_mesh_program(`programOrReply`: RustBuffer.ByValue,`optionsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_mesh_to_splat(`positions`: RustBuffer.ByValue,`indices`: RustBuffer.ByValue,`vertexColors`: RustBuffer.ByValue,`fallbackRgba`: RustBuffer.ByValue,`isSpace`: Byte,`maxSplats`: Int,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_sculpt_engine_fn_func_plan_text(`prompt`: RustBuffer.ByValue,`seed`: Int,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_ply_to_splat(`plyBytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_sculpt_engine_fn_func_program_prompt(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_sculpt_engine_fn_func_program_schema(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_sculpt_engine_fn_func_render_snapshot(`objects`: RustBuffer.ByValue,`cameraJson`: RustBuffer.ByValue,`width`: Int,`height`: Int,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_sort_splats(`splatBytes`: RustBuffer.ByValue,`camPos`: RustBuffer.ByValue,`camForward`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_splat_stats(`splatBytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_splat_to_compact(`splatBytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_splat_to_ply(`splatBytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_sculpt_engine_fn_func_text_to_3d(`prompt`: RustBuffer.ByValue,`optionsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -1018,13 +1058,31 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
+    if ((lib.uniffi_sculpt_engine_checksum_func_compact_to_splat() and 0xFFFF) != 23341) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_sculpt_engine_checksum_func_draw3d_from_points() and 0xFFFF) != 6254) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_edit_splat_prompt() and 0xFFFF) != 47357) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_image_to_3d() and 0xFFFF) != 52351) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_image_to_splat() and 0xFFFF) != 63580) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_sculpt_engine_checksum_func_mesh_program() and 0xFFFF) != 47970) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_sculpt_engine_checksum_func_mesh_to_splat() and 0xFFFF) != 25169) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_sculpt_engine_checksum_func_plan_text() and 0xFFFF) != 23715) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_ply_to_splat() and 0xFFFF) != 37063) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_sculpt_engine_checksum_func_program_prompt() and 0xFFFF) != 41239) {
@@ -1034,6 +1092,18 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_sculpt_engine_checksum_func_render_snapshot() and 0xFFFF) != 39699) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_sort_splats() and 0xFFFF) != 30388) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_splat_stats() and 0xFFFF) != 41222) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_splat_to_compact() and 0xFFFF) != 6772) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_splat_to_ply() and 0xFFFF) != 52477) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_sculpt_engine_checksum_func_text_to_3d() and 0xFFFF) != 32481) {
@@ -2677,6 +2747,57 @@ public object FfiConverterTypeSnapshotObject: FfiConverterRustBuffer<SnapshotObj
 
 
 
+/**
+ * Result returned by prompt-based Gaussian Splat editing across Swift/Kotlin FFI.
+ */
+data class SplatEditRecord (
+    var `splatBytes`: kotlin.ByteArray
+    , 
+    var `summary`: kotlin.String
+    , 
+    var `count`: kotlin.UInt
+    , 
+    var `modified`: kotlin.UInt
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSplatEditRecord: FfiConverterRustBuffer<SplatEditRecord> {
+    override fun read(buf: ByteBuffer): SplatEditRecord {
+        return SplatEditRecord(
+            FfiConverterByteArray.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: SplatEditRecord) = (
+            FfiConverterByteArray.allocationSize(value.`splatBytes`) +
+            FfiConverterString.allocationSize(value.`summary`) +
+            FfiConverterUInt.allocationSize(value.`count`) +
+            FfiConverterUInt.allocationSize(value.`modified`)
+    )
+
+    override fun write(value: SplatEditRecord, buf: ByteBuffer) {
+            FfiConverterByteArray.write(value.`splatBytes`, buf)
+            FfiConverterString.write(value.`summary`, buf)
+            FfiConverterUInt.write(value.`count`, buf)
+            FfiConverterUInt.write(value.`modified`, buf)
+    }
+}
+
+
+
 
 
 sealed class EngineException: kotlin.Exception() {
@@ -2927,6 +3048,21 @@ public object FfiConverterSequenceTypeSnapshotObject: FfiConverterRustBuffer<Lis
     }
 }
         /**
+         * Unpacks `.dsplat` (v2 12 B/splat or v1 16 B/splat) back to standard `.splat` (32 B/splat).
+         */
+    @Throws(EngineException::class) fun `compactToSplat`(`compactBytes`: kotlin.ByteArray): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(EngineException) { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_compact_to_splat(
+    
+        
+        FfiConverterByteArray.lower(`compactBytes`),_status)
+}
+    )
+    }
+    
+
+        /**
          * Draw in 3D free function: builds a watertight tube/ribbon `SceneCommand.addMesh` JSON from
          * flat `[x, y, z, radius, ...]` samples and options JSON.
          */
@@ -2938,6 +3074,61 @@ public object FfiConverterSequenceTypeSnapshotObject: FfiConverterRustBuffer<Lis
         
         FfiConverterSequenceFloat.lower(`pointsXyzr`),
         FfiConverterString.lower(`optionsJson`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Edits an item or captured space Gaussian Splat cloud using a natural-language prompt.
+         */
+    @Throws(EngineException::class) fun `editSplatPrompt`(`splatBytes`: kotlin.ByteArray, `prompt`: kotlin.String): SplatEditRecord {
+            return FfiConverterTypeSplatEditRecord.lift(
+    uniffiRustCallWithError(EngineException) { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_edit_splat_prompt(
+    
+        
+        FfiConverterByteArray.lower(`splatBytes`),
+        FfiConverterString.lower(`prompt`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * On-device free Image-to-3D reconstruction (RGBA8 + optional depth map -> text3d-compatible JSON).
+         */ fun `imageTo3d`(`width`: kotlin.UInt, `height`: kotlin.UInt, `rgba`: kotlin.ByteArray, `depth`: List<kotlin.Float>, `optionsJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_image_to_3d(
+    
+        
+        FfiConverterUInt.lower(`width`),
+        FfiConverterUInt.lower(`height`),
+        FfiConverterByteArray.lower(`rgba`),
+        FfiConverterSequenceFloat.lower(`depth`),
+        FfiConverterString.lower(`optionsJson`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * On-device Image-to-Gaussian-Splat (items when `is_space == false`, walkable spaces when `is_space == true`).
+         * Returns standard 32-byte-per-Gaussian `.splat` bytes.
+         */
+    @Throws(EngineException::class) fun `imageToSplat`(`width`: kotlin.UInt, `height`: kotlin.UInt, `rgba`: kotlin.ByteArray, `depth`: List<kotlin.Float>, `isSpace`: kotlin.Boolean, `maxSplats`: kotlin.UInt): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(EngineException) { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_image_to_splat(
+    
+        
+        FfiConverterUInt.lower(`width`),
+        FfiConverterUInt.lower(`height`),
+        FfiConverterByteArray.lower(`rgba`),
+        FfiConverterSequenceFloat.lower(`depth`),
+        FfiConverterBoolean.lower(`isSpace`),
+        FfiConverterUInt.lower(`maxSplats`),_status)
 }
     )
     }
@@ -2959,6 +3150,26 @@ public object FfiConverterSequenceTypeSnapshotObject: FfiConverterRustBuffer<Lis
     
 
         /**
+         * Converts any triangle mesh (single object OR captured ARKit/visionOS room mesh) into 3D Gaussian Splats.
+         */
+    @Throws(EngineException::class) fun `meshToSplat`(`positions`: List<kotlin.Float>, `indices`: List<kotlin.UInt>, `vertexColors`: List<kotlin.Float>, `fallbackRgba`: List<kotlin.Float>, `isSpace`: kotlin.Boolean, `maxSplats`: kotlin.UInt): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(EngineException) { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_mesh_to_splat(
+    
+        
+        FfiConverterSequenceFloat.lower(`positions`),
+        FfiConverterSequenceUInt.lower(`indices`),
+        FfiConverterSequenceFloat.lower(`vertexColors`),
+        FfiConverterSequenceFloat.lower(`fallbackRgba`),
+        FfiConverterBoolean.lower(`isSpace`),
+        FfiConverterUInt.lower(`maxSplats`),_status)
+}
+    )
+    }
+    
+
+        /**
          * Plans `prompt` without meshing (`{ok, understood, notes, program}`).
          */ fun `planText`(`prompt`: kotlin.String, `seed`: kotlin.UInt): kotlin.String {
             return FfiConverterString.lift(
@@ -2968,6 +3179,21 @@ public object FfiConverterSequenceTypeSnapshotObject: FfiConverterRustBuffer<Lis
         
         FfiConverterString.lower(`prompt`),
         FfiConverterUInt.lower(`seed`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Imports standard 3DGS `.ply` (binary little-endian or ASCII) into compact `.splat` bytes.
+         */
+    @Throws(EngineException::class) fun `plyToSplat`(`plyBytes`: kotlin.ByteArray): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(EngineException) { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_ply_to_splat(
+    
+        
+        FfiConverterByteArray.lower(`plyBytes`),_status)
 }
     )
     }
@@ -3009,6 +3235,68 @@ public object FfiConverterSequenceTypeSnapshotObject: FfiConverterRustBuffer<Lis
         FfiConverterString.lower(`cameraJson`),
         FfiConverterUInt.lower(`width`),
         FfiConverterUInt.lower(`height`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Fast O(N) radix sort of splats back-to-front relative to a camera position and forward vector.
+         */
+    @Throws(EngineException::class) fun `sortSplats`(`splatBytes`: kotlin.ByteArray, `camPos`: List<kotlin.Float>, `camForward`: List<kotlin.Float>): List<kotlin.UInt> {
+            return FfiConverterSequenceUInt.lift(
+    uniffiRustCallWithError(EngineException) { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_sort_splats(
+    
+        
+        FfiConverterByteArray.lower(`splatBytes`),
+        FfiConverterSequenceFloat.lower(`camPos`),
+        FfiConverterSequenceFloat.lower(`camForward`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Returns JSON statistics (`count`, `boundsMin`, `boundsMax`, `center`, `size`, `avgOpacity`, `splatBytes`).
+         */
+    @Throws(EngineException::class) fun `splatStats`(`splatBytes`: kotlin.ByteArray): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(EngineException) { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_splat_stats(
+    
+        
+        FfiConverterByteArray.lower(`splatBytes`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Packs `.splat` (32 B/splat) into ultra-compact `.dsplat` v2 (12 B/splat, 2.67x smaller than .splat).
+         */
+    @Throws(EngineException::class) fun `splatToCompact`(`splatBytes`: kotlin.ByteArray): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(EngineException) { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_splat_to_compact(
+    
+        
+        FfiConverterByteArray.lower(`splatBytes`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Converts compact `.splat` bytes to standard 3DGS binary `.ply` bytes.
+         */
+    @Throws(EngineException::class) fun `splatToPly`(`splatBytes`: kotlin.ByteArray): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(EngineException) { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_splat_to_ply(
+    
+        
+        FfiConverterByteArray.lower(`splatBytes`),_status)
 }
     )
     }

@@ -138,13 +138,22 @@ impl Draw3DOptions {
 /// from 3D stroke points `(pos, radius)` and `Draw3DOptions`.
 /// Returns `(local_mesh, world_pivot)` so the mesh can be placed at `world_pivot` as a scene object.
 pub fn build_tube_mesh_with_pivot(raw_points: &[Draw3DPoint], opts: &Draw3DOptions) -> Result<(Mesh, Vec3), String> {
-    // 1. Clean & deduplicate consecutive samples.
+    let opts = Draw3DOptions {
+        radial_segments: opts.radial_segments.clamp(3, 48),
+        taper_start: if opts.taper_start.is_finite() { opts.taper_start.clamp(0.0, 1.0) } else { 0.0 },
+        taper_end: if opts.taper_end.is_finite() { opts.taper_end.clamp(0.0, 1.0) } else { 0.0 },
+        ribbon_aspect: if opts.ribbon_aspect.is_finite() { opts.ribbon_aspect.clamp(0.08, 1.0) } else { 0.28 },
+        smooth_subdivisions: opts.smooth_subdivisions.clamp(1, 12),
+        ..*opts
+    };
+
+    // 1. Clean & deduplicate consecutive coincident samples and sanitize radii.
     let mut clean: Vec<Draw3DPoint> = Vec::with_capacity(raw_points.len());
     for &pt in raw_points {
-        if !pt.pos.is_finite() || !pt.radius.is_finite() {
+        if !pt.pos.is_finite() {
             continue;
         }
-        let radius = pt.radius.max(0.15);
+        let radius = if pt.radius.is_finite() { pt.radius.clamp(0.15, 500.0) } else { 1.0 };
         if let Some(last) = clean.last() {
             if (pt.pos - last.pos).length_squared() < 1e-4 {
                 continue;
@@ -152,18 +161,43 @@ pub fn build_tube_mesh_with_pivot(raw_points: &[Draw3DPoint], opts: &Draw3DOptio
         }
         clean.push(Draw3DPoint { pos: pt.pos, radius });
     }
+    if opts.closed && clean.len() >= 2 && (clean[0].pos - clean.last().unwrap().pos).length_squared() < 1e-4 {
+        clean.pop();
+    }
     if clean.len() < 2 {
         return Err("Draw in 3D needs at least 2 distinct points".into());
     }
 
     // 2. Smooth with Catmull-Rom spline & resample uniformly by arc length.
-    let spine = smooth_and_resample(&clean, opts.closed, opts.smooth_subdivisions);
-    if spine.len() < 2 {
+    let mut spine = smooth_and_resample(&clean, opts.closed, opts.smooth_subdivisions);
+    // Deduplicate any coincident resampled points (e.g. from tight loops or backtracking).
+    let mut dedup: Vec<Draw3DPoint> = Vec::with_capacity(spine.len());
+    for pt in spine.drain(..) {
+        if !pt.pos.is_finite() {
+            continue;
+        }
+        if let Some(last) = dedup.last() {
+            if (pt.pos - last.pos).length_squared() < 1e-6 {
+                continue;
+            }
+        }
+        dedup.push(Draw3DPoint {
+            pos: pt.pos,
+            radius: if pt.radius.is_finite() { pt.radius.clamp(0.15, 500.0) } else { 1.0 },
+        });
+    }
+    if opts.closed && dedup.len() >= 2 && (dedup[0].pos - dedup.last().unwrap().pos).length_squared() < 1e-6 {
+        dedup.pop();
+    }
+    if dedup.len() < 2 {
         return Err("Draw in 3D curve collapsed".into());
     }
 
     // 3. Build single tube mesh in world space.
-    let base = sweep_single_tube(&spine, opts);
+    let base = sweep_single_tube(&dedup, &opts);
+    if base.positions.is_empty() || base.faces.is_empty() || !base.positions.iter().all(|p| p.is_finite()) {
+        return Err("Draw in 3D produced invalid geometry".into());
+    }
 
     // 4. Mirror according to symmetry flags `[bool; 3]`.
     let mut combined = combine_with_symmetry(&base, opts.symmetry);
@@ -353,14 +387,31 @@ fn profile_coords(profile: TubeProfile, segs: usize, ribbon_aspect: f32) -> Vec<
     }
 }
 
+/// NaN-free shortest-arc rotation between two unit vectors, safely handling exact 180° reversals.
+fn safe_rotation_arc(from: Vec3, to: Vec3, fallback_axis: Vec3) -> Quat {
+    let dot = from.dot(to).clamp(-1.0, 1.0);
+    if dot > 0.99999 {
+        return Quat::IDENTITY;
+    }
+    if dot < -0.99999 {
+        let mut axis = fallback_axis - from * fallback_axis.dot(from);
+        if axis.length_squared() < 1e-6 {
+            let alt = if from.z.abs() < 0.9 { Vec3::Z } else { Vec3::X };
+            axis = alt - from * alt.dot(from);
+        }
+        return Quat::from_axis_angle(axis.normalize(), std::f32::consts::PI);
+    }
+    Quat::from_rotation_arc(from, to)
+}
+
 fn sweep_single_tube(spine: &[Draw3DPoint], opts: &Draw3DOptions) -> Mesh {
     let m = spine.len();
     let closed = opts.closed && m >= 3;
 
-    // 1. Unit tangents.
+    // 1. Unit tangents (robust against 180° hairpins where central difference cancels to zero).
     let mut tangents = Vec::with_capacity(m);
     for i in 0..m {
-        let t = if closed {
+        let mut t = if closed {
             let prev = spine[(i + m - 1) % m].pos;
             let next = spine[(i + 1) % m].pos;
             next - prev
@@ -371,6 +422,12 @@ fn sweep_single_tube(spine: &[Draw3DPoint], opts: &Draw3DOptions) -> Mesh {
         } else {
             spine[i + 1].pos - spine[i - 1].pos
         };
+        if t.length_squared() < 1e-8 && i + 1 < m {
+            t = spine[i + 1].pos - spine[i].pos;
+        }
+        if t.length_squared() < 1e-8 && i > 0 {
+            t = spine[i].pos - spine[i - 1].pos;
+        }
         let unit = t.normalize_or_zero();
         let fallback = if i > 0 { tangents[i - 1] } else { Vec3::Z };
         tangents.push(if unit.length_squared() > 0.5 { unit } else { fallback });
@@ -385,11 +442,11 @@ fn sweep_single_tube(spine: &[Draw3DPoint], opts: &Draw3DOptions) -> Mesh {
     binormals.push(tangents[0].cross(n0).normalize());
 
     for i in 1..m {
-        let q = Quat::from_rotation_arc(tangents[i - 1], tangents[i]);
+        let q = safe_rotation_arc(tangents[i - 1], tangents[i], normals[i - 1]);
         let mut ni = q * normals[i - 1];
         // Re-orthonormalize to eliminate floating-point drift.
         ni = (ni - tangents[i] * ni.dot(tangents[i])).normalize_or_zero();
-        if ni.length_squared() < 0.5 {
+        if ni.length_squared() < 0.5 || !ni.is_finite() {
             let alt = if tangents[i].z.abs() < 0.9 { Vec3::Z } else { Vec3::X };
             ni = (alt - tangents[i] * alt.dot(tangents[i])).normalize();
         }
@@ -399,19 +456,23 @@ fn sweep_single_tube(spine: &[Draw3DPoint], opts: &Draw3DOptions) -> Mesh {
 
     // Close twist seamlessly for closed loops.
     if closed {
-        let q_close = Quat::from_rotation_arc(tangents[m - 1], tangents[0]);
+        let q_close = safe_rotation_arc(tangents[m - 1], tangents[0], normals[m - 1]);
         let mut n_end = q_close * normals[m - 1];
         n_end = (n_end - tangents[0] * n_end.dot(tangents[0])).normalize_or_zero();
-        let cos_a = n_end.dot(normals[0]).clamp(-1.0, 1.0);
-        let sin_a = n_end.dot(binormals[0]);
-        let twist = sin_a.atan2(cos_a);
-        for i in 1..m {
-            let ang = -twist * (i as f32 / m as f32);
-            let (s, c) = ang.sin_cos();
-            let n = normals[i];
-            let b = binormals[i];
-            normals[i] = n * c + b * s;
-            binormals[i] = -n * s + b * c;
+        if n_end.length_squared() > 0.5 && n_end.is_finite() {
+            let cos_a = n_end.dot(normals[0]).clamp(-1.0, 1.0);
+            let sin_a = n_end.dot(binormals[0]);
+            let twist = sin_a.atan2(cos_a);
+            if twist.is_finite() {
+                for i in 1..m {
+                    let ang = -twist * (i as f32 / m as f32);
+                    let (s, c) = ang.sin_cos();
+                    let n = normals[i];
+                    let b = binormals[i];
+                    normals[i] = n * c + b * s;
+                    binormals[i] = -n * s + b * c;
+                }
+            }
         }
     }
 
@@ -654,5 +715,54 @@ mod tests {
         assert_eq!(parsed["addMesh"]["name"], "3D Tube");
         assert!(parsed["addMesh"]["_0"]["positions"].is_array());
         assert!(parsed["addMesh"]["_0"]["faces"].is_array());
+    }
+
+    #[test]
+    fn single_point_and_coincident_points_return_clean_error() {
+        let single = vec![Draw3DPoint { pos: Vec3::new(1.0, 2.0, 3.0), radius: 2.0 }];
+        assert!(build_tube_mesh(&single, &Draw3DOptions::default()).is_err());
+
+        let dupes = vec![
+            Draw3DPoint { pos: Vec3::new(5.0, 5.0, 5.0), radius: 2.0 },
+            Draw3DPoint { pos: Vec3::new(5.0, 5.0, 5.0), radius: 2.0 },
+            Draw3DPoint { pos: Vec3::new(5.0001, 5.0, 5.0), radius: 2.0 },
+        ];
+        assert!(build_tube_mesh(&dupes, &Draw3DOptions::default()).is_err());
+    }
+
+    #[test]
+    fn sharp_180_degree_reversal_has_no_nan_and_is_watertight() {
+        // Explicit 180-degree hairpin backtrack along +X then -X!
+        let hairpin = vec![
+            Draw3DPoint { pos: Vec3::new(0.0, 0.0, 0.0), radius: 1.5 },
+            Draw3DPoint { pos: Vec3::new(10.0, 0.0, 0.0), radius: 1.5 },
+            Draw3DPoint { pos: Vec3::new(20.0, 0.0, 0.0), radius: 1.5 },
+            Draw3DPoint { pos: Vec3::new(10.0, 0.0, 0.0), radius: 1.5 },
+            Draw3DPoint { pos: Vec3::new(0.0, 0.0, 0.0), radius: 1.5 },
+        ];
+        let opts = Draw3DOptions { smooth_subdivisions: 1, ..Default::default() };
+        let mesh = build_tube_mesh(&hairpin, &opts).unwrap();
+        assert!(mesh.positions.iter().all(|p| p.is_finite()), "no NaN/Inf positions on 180-degree reversal");
+        assert!(is_manifold(&mesh), "180-degree hairpin tube must remain strictly manifold");
+    }
+
+    #[test]
+    fn extreme_radii_and_tapers_stay_finite_and_watertight() {
+        let pts = vec![
+            Draw3DPoint { pos: Vec3::new(0.0, 0.0, 0.0), radius: -10.0 },
+            Draw3DPoint { pos: Vec3::new(5.0, 0.0, 5.0), radius: f32::NAN },
+            Draw3DPoint { pos: Vec3::new(10.0, 2.0, 10.0), radius: 1e9 },
+            Draw3DPoint { pos: Vec3::new(15.0, 0.0, 15.0), radius: 0.0 },
+        ];
+        let opts = Draw3DOptions {
+            taper_start: 5.0,
+            taper_end: f32::NAN,
+            ribbon_aspect: -2.0,
+            radial_segments: 0,
+            ..Default::default()
+        };
+        let mesh = build_tube_mesh(&pts, &opts).unwrap();
+        assert!(mesh.positions.iter().all(|p| p.is_finite()));
+        assert!(is_manifold(&mesh));
     }
 }

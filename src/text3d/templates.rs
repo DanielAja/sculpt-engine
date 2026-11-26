@@ -585,49 +585,87 @@ fn species(name: &str) -> Option<Species> {
 }
 
 fn quadruped(s: &Species, r: &mut Rng) -> Parts {
-    let (l, g, lg, hr) = (r.v(s.len), r.v(s.girth), r.v(s.leg), r.v(s.head));
-    let bz = lg + g * 0.4;
-    let mut body = vec![ellipsoid(l, g, g * 0.85).at(0.0, 0.0, bz)];
-    let lr = g * 0.16;
-    body.push(four(capsule([l * 0.32, g * 0.26, bz], [l * 0.32, g * 0.26, lr], lr)));
-    let head = [l * 0.5 + hr * 0.35, 0.0, bz + g * 0.25 + s.neck];
+    // Stylized, super-cute Pixar/plush proportions: slightly rounder chubbier torso, bigger expressive head,
+    // soft stubbier paws, fluffy cheek/chest tufts, glossy eyes with bright catch-lights, and cute button nose!
+    let (l, g, lg, hr) = (r.v(s.len) * 0.94, r.v(s.girth) * 1.14, r.v(s.leg) * 0.88, r.v(s.head) * 1.24);
+    let bz = lg + g * 0.40;
+    let mut body = vec![ellipsoid(l, g, g * 0.92).at(0.0, 0.0, bz)];
+    // Fluffy chest ruff for cuddly silhouette
+    body.push(ellipsoid(g * 0.52, g * 0.66, g * 0.62).at(l * 0.34, 0.0, bz + g * 0.06));
+    let lr = g * 0.175;
+    body.push(four(capsule([l * 0.31, g * 0.25, bz], [l * 0.31, g * 0.25, lr * 1.12], lr)));
+    // Soft rounded little paws resting cleanly on z = 0 (even after smooth-union blend)
+    body.push(four(ellipsoid(lr * 2.40, lr * 2.15, lr * 1.35).at(l * 0.33, g * 0.25, lr * 1.02)));
+    let head = [l * 0.46 + hr * 0.34, 0.0, bz + g * 0.26 + s.neck * 0.92];
     if s.neck > 0.0 {
-        body.push(capsule([l * 0.36, 0.0, bz + g * 0.1], [head[0] - hr * 0.3, 0.0, head[2] - hr * 0.3], g * 0.2));
+        body.push(capsule([l * 0.34, 0.0, bz + g * 0.10], [head[0] - hr * 0.28, 0.0, head[2] - hr * 0.26], g * 0.22));
     }
-    body.push(sphere(hr).at(head[0], 0.0, head[2]));
+    // Round head + soft fluffy cheek puffs + tiny head hair tuft
+    body.push(ellipsoid(hr * 1.98, hr * 2.12, hr * 1.92).at(head[0], 0.0, head[2]));
+    body.push(sphere(hr * 0.46).at(head[0] + hr * 0.18, hr * 0.68, head[2] - hr * 0.20).mirror(Y));
+    body.push(cone(hr * 0.22, 0.0, hr * 0.42).rot(0.0, -18.0, 0.0).at(head[0] + hr * 0.05, 0.0, head[2] + hr * 1.02));
+    let snout_tip_x;
+    let snout_tip_z;
     if s.snout > 0.0 {
-        body.push(ellipsoid(hr * 0.7 + s.snout, hr * 1.05, hr * 0.85).at(head[0] + hr * 0.45 + s.snout * 0.4, 0.0, head[2] - hr * 0.25));
+        let sn = s.snout * 0.82;
+        let sx = head[0] + hr * 0.48 + sn * 0.34;
+        let sz = head[2] - hr * 0.22;
+        body.push(ellipsoid(hr * 0.68 + sn, hr * 0.98, hr * 0.76).at(sx, 0.0, sz));
+        snout_tip_x = sx + (hr * 0.68 + sn) * 0.48;
+        snout_tip_z = sz + hr * 0.08;
+    } else {
+        // Adorable tiny button muzzle for cats/bunnies/bears
+        let sx = head[0] + hr * 0.76;
+        let sz = head[2] - hr * 0.16;
+        body.push(ellipsoid(hr * 0.42, hr * 0.56, hr * 0.38).at(sx, 0.0, sz));
+        snout_tip_x = sx + hr * 0.22;
+        snout_tip_z = sz + hr * 0.08;
     }
     match s.ear {
-        Ear::Pointy => body.push(cone(hr * 0.36, 0.0, hr * 0.75).rot(-12.0, 0.0, 0.0).at(head[0] - hr * 0.1, hr * 0.55, head[2] + hr * 0.85).mirror(Y)),
-        Ear::Floppy => body.push(ellipsoid(hr * 0.5, hr * 0.28, hr * 1.15).at(head[0] - hr * 0.15, hr * 0.92, head[2] - hr * 0.15).mirror(Y)),
-        Ear::Long => body.push(capsule([head[0] - hr * 0.2, hr * 0.35, head[2] + hr * 0.6], [head[0] - hr * 0.45, hr * 0.5, head[2] + hr * 2.3], hr * 0.26).mirror(Y)),
-        Ear::Round => body.push(sphere(hr * 0.33).at(head[0] - hr * 0.15, hr * 0.7, head[2] + hr * 0.75).mirror(Y)),
-        Ear::Big => body.push(ellipsoid(hr * 0.3, hr * 1.4, hr * 1.7).at(head[0] - hr * 0.55, hr * 0.95, head[2]).mirror(Y)),
+        Ear::Pointy => body.push(cone(hr * 0.42, hr * 0.06, hr * 0.78).rot(-16.0, 0.0, 0.0).at(head[0] - hr * 0.08, hr * 0.56, head[2] + hr * 0.86).mirror(Y)),
+        Ear::Floppy => body.push(ellipsoid(hr * 0.54, hr * 0.32, hr * 1.20).rot(10.0, 0.0, 0.0).at(head[0] - hr * 0.14, hr * 0.92, head[2] - hr * 0.16).mirror(Y)),
+        Ear::Long => body.push(capsule([head[0] - hr * 0.18, hr * 0.34, head[2] + hr * 0.58], [head[0] - hr * 0.38, hr * 0.52, head[2] + hr * 2.15], hr * 0.30).mirror(Y)),
+        Ear::Round => body.push(sphere(hr * 0.42).at(head[0] - hr * 0.12, hr * 0.72, head[2] + hr * 0.74).mirror(Y)),
+        Ear::Big => body.push(ellipsoid(hr * 0.34, hr * 1.38, hr * 1.65).at(head[0] - hr * 0.52, hr * 0.96, head[2]).mirror(Y)),
         Ear::None => {}
     }
     if s.tail > 0.0 {
         let t = r.v(s.tail);
-        let start = [-l * 0.46, 0.0, bz + g * 0.15];
-        let dir = glam::Vec2::new(-1.0, s.tail_up).normalize() * t;
-        body.push(capsule(start, [start[0] + dir.x, 0.0, (start[2] + dir.y).max(g * 0.08)], (g * 0.07).max(1.5)));
+        let start = [-l * 0.44, 0.0, bz + g * 0.16];
+        let dir = glam::Vec2::new(-1.0, s.tail_up.max(0.18)).normalize() * t;
+        let end = [start[0] + dir.x, 0.0, (start[2] + dir.y).max(g * 0.10)];
+        let tr = (g * 0.095).max(2.2);
+        body.push(capsule(start, end, tr));
+        // Fluffy puffball tip on tail
+        body.push(sphere(tr * 1.38).at(end[0], 0.0, end[2]));
     }
     if s.trunk {
         body.push(capsule([head[0] + hr * 0.8, 0.0, head[2] - hr * 0.2], [head[0] + hr * 1.25, 0.0, lg * 0.35], hr * 0.24));
     }
-    let mut parts = vec![p("Body", s.color, union(g * 0.16, body)).finish(0.0, 0.8)];
+    let mut parts = vec![p("Body", s.color, union(g * 0.18, body)).finish(0.0, 0.88)];
     if s.horns || s.horn {
         let h = if s.horn {
-            cone(hr * 0.16, 0.0, hr * 1.0).rot(0.0, 30.0, 0.0).at(head[0] + hr * 0.4, 0.0, head[2] + hr * 1.1)
+            cone(hr * 0.18, 0.0, hr * 0.95).rot(0.0, 30.0, 0.0).at(head[0] + hr * 0.38, 0.0, head[2] + hr * 1.05)
         } else {
-            cone(hr * 0.15, 0.0, hr * 0.75).rot(-15.0, 0.0, 0.0).at(head[0] - hr * 0.1, hr * 0.38, head[2] + hr * 1.0).mirror(Y)
+            cone(hr * 0.16, 0.0, hr * 0.72).rot(-15.0, 0.0, 0.0).at(head[0] - hr * 0.10, hr * 0.38, head[2] + hr * 0.98).mirror(Y)
         };
-        parts.push(p("Horns", if s.horn { GOLD } else { "#f4ecd6" }, h).finish(if s.horn { 1.0 } else { 0.0 }, 0.4));
+        parts.push(p("Horns", if s.horn { GOLD } else { "#f4ecd6" }, h).finish(if s.horn { 1.0 } else { 0.0 }, 0.35));
     }
     if s.wings {
-        parts.push(p("Wings", "#2e7d4f", extrude(&[(l * 0.2, 0.0), (-l * 0.25, 0.0), (-l * 0.15, l * 0.55), (l * 0.05, l * 0.7)], (g * 0.12).max(4.0)).rot(55.0, 0.0, 0.0).at(0.0, g * 0.3, bz + g * 0.42).mirror(Y)).finish(0.0, 0.6));
+        parts.push(p("Wings", "#2e7d4f", extrude(&[(l * 0.2, 0.0), (-l * 0.25, 0.0), (-l * 0.15, l * 0.55), (l * 0.05, l * 0.7)], (g * 0.12).max(4.0)).rot(55.0, 0.0, 0.0).at(0.0, g * 0.3, bz + g * 0.42).mirror(Y)).finish(0.0, 0.65));
     }
-    parts.push(side_eyes(hr * 0.14, head[0] + hr * 0.78, hr * 0.42, head[2] + hr * 0.25));
+    // Cute glossy button nose
+    if !s.trunk {
+        let nose_color = if s.ear == Ear::Long || s.ear == Ear::Round { "#f294a5" } else { "#2c2220" };
+        parts.push(p("Nose", nose_color, ellipsoid(hr * 0.20, hr * 0.26, hr * 0.18).at(snout_tip_x, 0.0, snout_tip_z)).finish(0.0, 0.16));
+    }
+    // Big glossy expressive dark eyes + bright white specular catch-lights!
+    let eye_r = hr * 0.20;
+    let eye_x = head[0] + hr * 0.76;
+    let eye_y = hr * 0.42;
+    let eye_z = head[2] + hr * 0.18;
+    parts.push(p("Eyes", BLACK, sphere(eye_r).at(eye_x, eye_y, eye_z).mirror(Y)).finish(0.0, 0.06));
+    parts.push(p("EyeSparkle", WHITE, sphere(eye_r * 0.36).at(eye_x + eye_r * 0.72, eye_y + eye_r * 0.18, eye_z + eye_r * 0.42).mirror(Y)).finish(0.0, 0.04));
     parts
 }
 
@@ -661,25 +699,35 @@ fn bird(b: &BirdKind, r: &mut Rng) -> Parts {
     let l = r.v(b.len);
     let bz = b.leg + l * 0.35;
     let (body, head_c) = if b.upright {
-        (ellipsoid(l * 0.7, l * 0.62, l).at(0.0, 0.0, b.leg + l * 0.5), [l * 0.08, 0.0, b.leg + l * 1.0])
+        (ellipsoid(l * 0.78, l * 0.72, l).at(0.0, 0.0, b.leg + l * 0.48), [l * 0.06, 0.0, b.leg + l * 0.96])
     } else {
-        (ellipsoid(l, l * 0.55, l * 0.6).at(0.0, 0.0, bz), [l * 0.42, 0.0, bz + l * 0.3 + b.neck])
+        (ellipsoid(l, l * 0.68, l * 0.70).at(0.0, 0.0, bz), [l * 0.38, 0.0, bz + l * 0.30 + b.neck])
     };
-    let hr = l * if b.upright { 0.3 } else { 0.24 };
-    let mut bits = vec![body, ellipsoid(l * 0.6, l * 0.12, l * 0.36).rot(0.0, -10.0, 0.0).at(-l * 0.05, l * 0.28, if b.upright { b.leg + l * 0.55 } else { bz + l * 0.05 }).mirror(Y)];
+    let hr = l * if b.upright { 0.35 } else { 0.30 };
+    let mut bits = vec![body, ellipsoid(l * 0.58, l * 0.16, l * 0.38).rot(0.0, -10.0, 0.0).at(-l * 0.04, l * 0.32, if b.upright { b.leg + l * 0.52 } else { bz + l * 0.05 }).mirror(Y)];
     if b.neck > 0.0 {
-        bits.push(capsule([l * 0.35, 0.0, bz + l * 0.1], [head_c[0], 0.0, head_c[2] - hr * 0.5], l * 0.1));
+        bits.push(capsule([l * 0.35, 0.0, bz + l * 0.1], [head_c[0], 0.0, head_c[2] - hr * 0.5], l * 0.11));
     }
     if !b.upright {
-        bits.push(extrude(&[(0.0, -l * 0.18), (0.0, l * 0.18), (-l * 0.35, 0.0)], l * 0.06).rot(0.0, -15.0, 0.0).at(-l * 0.48, 0.0, bz + l * 0.05));
+        bits.push(extrude(&[(0.0, -l * 0.18), (0.0, l * 0.18), (-l * 0.35, 0.0)], l * 0.07).rot(0.0, -15.0, 0.0).at(-l * 0.48, 0.0, bz + l * 0.06));
     }
-    let mut parts = vec![p("Body", b.color, union(l * 0.08, bits)).finish(0.0, 0.7)];
-    parts.push(p("Head", b.head, sphere(hr).at(head_c[0], 0.0, head_c[2])).finish(0.0, 0.7));
-    parts.push(p("Beak", b.beak, cone(hr * 0.35, 0.0, hr * 0.9).rot(0.0, 90.0, 0.0).at(head_c[0] + hr * 1.15, 0.0, head_c[2] - hr * 0.1)).finish(0.0, 0.4));
+    let mut parts = vec![p("Body", b.color, union(l * 0.10, bits)).finish(0.0, 0.85)];
+    let head_shape = union(hr * 0.14, vec![
+        sphere(hr).at(head_c[0], 0.0, head_c[2]),
+        // Adorable tiny head crest feather tuft
+        cone(hr * 0.22, 0.0, hr * 0.48).rot(0.0, -20.0, 0.0).at(head_c[0] - hr * 0.05, 0.0, head_c[2] + hr * 0.96),
+    ]);
+    parts.push(p("Head", b.head, head_shape).finish(0.0, 0.85));
+    parts.push(p("Beak", b.beak, cone(hr * 0.32, 0.0, hr * 0.68).rot(0.0, 90.0, 0.0).at(head_c[0] + hr * 1.02, 0.0, head_c[2] - hr * 0.10)).finish(0.0, 0.32));
     if b.leg > 5.0 {
-        parts.push(p("Legs", "#f5a623", capsule([0.0, l * 0.12, bz - l * 0.2], [0.0, l * 0.12, 1.0], (l * 0.035).max(1.2)).mirror(Y)));
+        parts.push(p("Legs", "#f5a623", capsule([0.0, l * 0.12, bz - l * 0.2], [0.0, l * 0.12, 1.0], (l * 0.042).max(1.4)).mirror(Y)));
     }
-    parts.push(side_eyes(hr * 0.16, head_c[0] + hr * 0.75, hr * 0.5, head_c[2] + hr * 0.2));
+    let eye_r = hr * 0.22;
+    let eye_x = head_c[0] + hr * 0.72;
+    let eye_y = hr * 0.46;
+    let eye_z = head_c[2] + hr * 0.16;
+    parts.push(p("Eyes", BLACK, sphere(eye_r).at(eye_x, eye_y, eye_z).mirror(Y)).finish(0.0, 0.06));
+    parts.push(p("EyeSparkle", WHITE, sphere(eye_r * 0.38).at(eye_x + eye_r * 0.70, eye_y + eye_r * 0.18, eye_z + eye_r * 0.40).mirror(Y)).finish(0.0, 0.04));
     parts
 }
 

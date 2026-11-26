@@ -387,6 +387,107 @@ pub fn program_schema() -> String {
     crate::text3d::host::program_schema()
 }
 
+/// On-device free Image-to-3D reconstruction (RGBA8 + optional depth -> text3d-compatible JSON).
+#[wasm_bindgen(js_name = imageTo3d)]
+pub fn image_to_3d(width: u32, height: u32, rgba: &[u8], depth: &[f32], options_json: &str) -> String {
+    let depth_opt = if depth.is_empty() { None } else { Some(depth) };
+    crate::img3d::image_to_3d_json(width, height, rgba, depth_opt, options_json)
+}
+
+/// On-device Image-to-Gaussian-Splat (`isSpace=false` for items, `isSpace=true` for full spaces).
+#[wasm_bindgen(js_name = imageToSplat)]
+pub fn image_to_splat(
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+    depth: &[f32],
+    is_space: bool,
+    max_splats: u32,
+) -> Result<Vec<u8>, JsValue> {
+    let depth_opt = if depth.is_empty() { None } else { Some(depth) };
+    let cloud = crate::splat::image_to_splat(width, height, rgba, depth_opt, is_space, max_splats as usize).map_err(err)?;
+    Ok(cloud.to_splat_bytes())
+}
+
+/// Converts a triangle mesh into a 3D Gaussian Splat cloud (`.splat` bytes).
+#[wasm_bindgen(js_name = meshToSplat)]
+pub fn mesh_to_splat(
+    positions: &[f32],
+    indices: &[u32],
+    vertex_colors: &[f32],
+    fallback_rgba: &[f32],
+    is_space: bool,
+    max_splats: u32,
+) -> Result<Vec<u8>, JsValue> {
+    let vc = if vertex_colors.is_empty() { None } else { Some(vertex_colors) };
+    let fb = if fallback_rgba.len() >= 4 {
+        [fallback_rgba[0], fallback_rgba[1], fallback_rgba[2], fallback_rgba[3]]
+    } else {
+        [0.8, 0.8, 0.8, 1.0]
+    };
+    let cloud = crate::splat::mesh_to_splat(positions, indices, vc, fb, is_space, max_splats as usize).map_err(err)?;
+    Ok(cloud.to_splat_bytes())
+}
+
+/// Edits an item or captured space Gaussian Splat via prompt; returns edited `.splat` bytes.
+#[wasm_bindgen(js_name = editSplatPrompt)]
+pub fn edit_splat_prompt(splat_bytes: &[u8], prompt: &str) -> Result<Vec<u8>, JsValue> {
+    let mut cloud = crate::splat::SplatCloud::from_splat_bytes(splat_bytes).map_err(err)?;
+    crate::splat::edit_splat_in_place(&mut cloud, prompt);
+    Ok(cloud.to_splat_bytes())
+}
+
+/// Edits a Gaussian Splat and returns the human-readable edit summary JSON `{summary, count, modified}`.
+#[wasm_bindgen(js_name = editSplatSummary)]
+pub fn edit_splat_summary(splat_bytes: &[u8], prompt: &str) -> Result<String, JsValue> {
+    let mut cloud = crate::splat::SplatCloud::from_splat_bytes(splat_bytes).map_err(err)?;
+    let (summary, modified) = crate::splat::edit_splat_in_place(&mut cloud, prompt);
+    Ok(serde_json::json!({ "summary": summary, "count": cloud.len(), "modified": modified }).to_string())
+}
+
+#[wasm_bindgen(js_name = splatToPly)]
+pub fn splat_to_ply(splat_bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
+    let cloud = crate::splat::SplatCloud::from_splat_bytes(splat_bytes).map_err(err)?;
+    Ok(cloud.to_ply_bytes())
+}
+
+#[wasm_bindgen(js_name = plyToSplat)]
+pub fn ply_to_splat(ply_bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
+    let cloud = crate::splat::SplatCloud::from_ply_bytes(ply_bytes).map_err(err)?;
+    Ok(cloud.to_splat_bytes())
+}
+
+#[wasm_bindgen(js_name = splatToCompact)]
+pub fn splat_to_compact(splat_bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
+    let cloud = crate::splat::SplatCloud::from_splat_bytes(splat_bytes).map_err(err)?;
+    Ok(cloud.to_compact_bytes())
+}
+
+#[wasm_bindgen(js_name = compactToSplat)]
+pub fn compact_to_splat(compact_bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
+    let cloud = crate::splat::SplatCloud::from_compact_bytes(compact_bytes).map_err(err)?;
+    Ok(cloud.to_splat_bytes())
+}
+
+#[wasm_bindgen(js_name = splatStats)]
+pub fn splat_stats(splat_bytes: &[u8]) -> Result<String, JsValue> {
+    let cloud = crate::splat::SplatCloud::from_splat_bytes(splat_bytes).map_err(err)?;
+    Ok(cloud.stats_json())
+}
+
+#[wasm_bindgen(js_name = sortSplats)]
+pub fn sort_splats(splat_bytes: &[u8], cam_pos: &[f32], cam_forward: &[f32]) -> Result<Vec<u32>, JsValue> {
+    if cam_pos.len() != 3 || cam_forward.len() != 3 {
+        return Err(err("cam_pos and cam_forward must have 3 floats"));
+    }
+    let cloud = crate::splat::SplatCloud::from_splat_bytes(splat_bytes).map_err(err)?;
+    Ok(crate::splat::sort_splats_by_camera(
+        &cloud,
+        [cam_pos[0], cam_pos[1], cam_pos[2]],
+        [cam_forward[0], cam_forward[1], cam_forward[2]],
+    ))
+}
+
 /// Draw in 3D free function (no GPU needed): builds a watertight tube/ribbon `SceneCommand.addMesh`
 /// JSON from flat `[x, y, z, radius, ...]` samples and options JSON.
 #[wasm_bindgen(js_name = draw3dFromPoints)]
@@ -402,4 +503,75 @@ pub fn draw3d_from_points(points_xyzr: &[f32], options_json: &str) -> Result<Str
     crate::draw3d::build_tube_add_mesh_command(&pts, &opts, &name, None)
         .map(|(_, _, cmd)| cmd)
         .map_err(err)
+}
+
+/// GPU-free Voxel / SDF Remesh helper: takes Sculptor Mesh JSON and returns a `setMesh` command JSON.
+#[wasm_bindgen(js_name = voxelRemeshMeshJson)]
+pub fn voxel_remesh_mesh_json(id: &str, mesh_json: &str, resolution: u32) -> Result<String, JsValue> {
+    let m: MeshIn = serde_json::from_str(mesh_json).map_err(err)?;
+    let n = (m.positions.len() / 3) as u32;
+    if m.positions.len() % 3 != 0 || m.faces.iter().any(|f| f.len() < 3 || f.iter().any(|&i| i >= n)) {
+        return Err(err("invalid mesh"));
+    }
+    let mesh = Mesh {
+        positions: m.positions.chunks_exact(3).map(|c| Vec3::new(c[0], c[1], c[2])).collect(),
+        faces: m.faces,
+        smooth_shading: m.smooth_shading,
+    };
+    let sm = crate::mesh::SculptMesh::from_mesh(&mesh);
+    let bvh = crate::bvh::Bvh::build(&sm.positions, &sm.tris);
+    let remeshed = crate::remesh::voxel_remesh(&sm, &bvh, resolution).map_err(err)?;
+    Ok(crate::format::set_mesh_command(id, &remeshed))
+}
+
+/// GPU-free Nomad Sculpt dab helper (for workers & headless tests): applies one or more dabs on Mesh JSON
+/// with optional initial per-vertex masks, returning `{ command, masks }`.
+#[wasm_bindgen(js_name = sculptDabMeshJson)]
+pub fn sculpt_dab_mesh_json(
+    id: &str,
+    mesh_json: &str,
+    kind: &str,
+    radius: f32,
+    strength: f32,
+    falloff: &str,
+    sym_x: bool,
+    sym_y: bool,
+    sym_z: bool,
+    radial_count: u32,
+    centers_xyz: &[f32],
+    initial_masks: &[f32],
+) -> Result<String, JsValue> {
+    let m: MeshIn = serde_json::from_str(mesh_json).map_err(err)?;
+    let n = (m.positions.len() / 3) as u32;
+    if m.positions.len() % 3 != 0 || m.faces.iter().any(|f| f.len() < 3 || f.iter().any(|&i| i >= n)) {
+        return Err(err("invalid mesh"));
+    }
+    let mesh = Mesh {
+        positions: m.positions.chunks_exact(3).map(|c| Vec3::new(c[0], c[1], c[2])).collect(),
+        faces: m.faces,
+        smooth_shading: m.smooth_shading,
+    };
+    let mut sm = crate::mesh::SculptMesh::from_mesh(&mesh);
+    if initial_masks.len() == sm.positions.len() {
+        sm.masks.copy_from_slice(initial_masks);
+    }
+    let bvh = crate::bvh::Bvh::build(&sm.positions, &sm.tris);
+    let mut scratch = crate::brush::Scratch::new(sm.positions.len());
+    let mut moved = Vec::new();
+    let mut dirty = Vec::new();
+    let p = crate::brush::BrushParams {
+        kind: crate::brush::BrushKind::parse(kind),
+        radius: radius.max(0.1),
+        strength: strength.clamp(-1.0, 1.0),
+        symmetry: [sym_x, sym_y, sym_z],
+        falloff: crate::brush::Falloff::parse(falloff),
+        radial_symmetry: radial_count.clamp(1, 16),
+    };
+    for c in centers_xyz.chunks_exact(3) {
+        crate::brush::dab_and_update_normals(&mut sm, &bvh, &mut scratch, Vec3::new(c[0], c[1], c[2]), &p, &mut moved, &mut dirty);
+    }
+    let out_mesh = sm.to_mesh();
+    let cmd = crate::format::set_mesh_command(id, &out_mesh);
+    let cmd_val: serde_json::Value = serde_json::from_str(&cmd).map_err(err)?;
+    Ok(serde_json::json!({ "command": cmd_val, "masks": sm.masks }).to_string())
 }

@@ -1497,6 +1497,71 @@ public func FfiConverterTypeSnapshotObject_lower(_ value: SnapshotObject) -> Rus
 }
 
 
+/**
+ * Result returned by prompt-based Gaussian Splat editing across Swift/Kotlin FFI.
+ */
+public struct SplatEditRecord: Equatable, Hashable {
+    public var splatBytes: Data
+    public var summary: String
+    public var count: UInt32
+    public var modified: UInt32
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(splatBytes: Data, summary: String, count: UInt32, modified: UInt32) {
+        self.splatBytes = splatBytes
+        self.summary = summary
+        self.count = count
+        self.modified = modified
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension SplatEditRecord: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSplatEditRecord: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SplatEditRecord {
+        return
+            try SplatEditRecord(
+                splatBytes: FfiConverterData.read(from: &buf), 
+                summary: FfiConverterString.read(from: &buf), 
+                count: FfiConverterUInt32.read(from: &buf), 
+                modified: FfiConverterUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SplatEditRecord, into buf: inout [UInt8]) {
+        FfiConverterData.write(value.splatBytes, into: &buf)
+        FfiConverterString.write(value.summary, into: &buf)
+        FfiConverterUInt32.write(value.count, into: &buf)
+        FfiConverterUInt32.write(value.modified, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSplatEditRecord_lift(_ buf: RustBuffer) throws -> SplatEditRecord {
+    return try FfiConverterTypeSplatEditRecord.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSplatEditRecord_lower(_ value: SplatEditRecord) -> RustBuffer {
+    return FfiConverterTypeSplatEditRecord.lower(value)
+}
+
+
 public 
 enum EngineError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
 
@@ -1714,6 +1779,17 @@ fileprivate struct FfiConverterSequenceTypeSnapshotObject: FfiConverterRustBuffe
     }
 }
 /**
+ * Unpacks `.dsplat` (v2 12 B/splat or v1 16 B/splat) back to standard `.splat` (32 B/splat).
+ */
+public func compactToSplat(compactBytes: Data)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_func_compact_to_splat(
+        FfiConverterData.lower(compactBytes),uniffiCallStatus
+    )
+})
+}
+/**
  * Draw in 3D free function: builds a watertight tube/ribbon `SceneCommand.addMesh` JSON from
  * flat `[x, y, z, radius, ...]` samples and options JSON.
  */
@@ -1723,6 +1799,50 @@ public func draw3dFromPoints(pointsXyzr: [Float], optionsJson: String)throws  ->
     uniffi_sculpt_engine_fn_func_draw3d_from_points(
         FfiConverterSequenceFloat.lower(pointsXyzr),
         FfiConverterString.lower(optionsJson),uniffiCallStatus
+    )
+})
+}
+/**
+ * Edits an item or captured space Gaussian Splat cloud using a natural-language prompt.
+ */
+public func editSplatPrompt(splatBytes: Data, prompt: String)throws  -> SplatEditRecord  {
+    return try  FfiConverterTypeSplatEditRecord_lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_func_edit_splat_prompt(
+        FfiConverterData.lower(splatBytes),
+        FfiConverterString.lower(prompt),uniffiCallStatus
+    )
+})
+}
+/**
+ * On-device free Image-to-3D reconstruction (RGBA8 + optional depth map -> text3d-compatible JSON).
+ */
+public func imageTo3d(width: UInt32, height: UInt32, rgba: Data, depth: [Float], optionsJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_func_image_to_3d(
+        FfiConverterUInt32.lower(width),
+        FfiConverterUInt32.lower(height),
+        FfiConverterData.lower(rgba),
+        FfiConverterSequenceFloat.lower(depth),
+        FfiConverterString.lower(optionsJson),uniffiCallStatus
+    )
+})
+}
+/**
+ * On-device Image-to-Gaussian-Splat (items when `is_space == false`, walkable spaces when `is_space == true`).
+ * Returns standard 32-byte-per-Gaussian `.splat` bytes.
+ */
+public func imageToSplat(width: UInt32, height: UInt32, rgba: Data, depth: [Float], isSpace: Bool, maxSplats: UInt32)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_func_image_to_splat(
+        FfiConverterUInt32.lower(width),
+        FfiConverterUInt32.lower(height),
+        FfiConverterData.lower(rgba),
+        FfiConverterSequenceFloat.lower(depth),
+        FfiConverterBool.lower(isSpace),
+        FfiConverterUInt32.lower(maxSplats),uniffiCallStatus
     )
 })
 }
@@ -1739,6 +1859,22 @@ public func meshProgram(programOrReply: String, optionsJson: String) -> String  
 })
 }
 /**
+ * Converts any triangle mesh (single object OR captured ARKit/visionOS room mesh) into 3D Gaussian Splats.
+ */
+public func meshToSplat(positions: [Float], indices: [UInt32], vertexColors: [Float], fallbackRgba: [Float], isSpace: Bool, maxSplats: UInt32)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_func_mesh_to_splat(
+        FfiConverterSequenceFloat.lower(positions),
+        FfiConverterSequenceUInt32.lower(indices),
+        FfiConverterSequenceFloat.lower(vertexColors),
+        FfiConverterSequenceFloat.lower(fallbackRgba),
+        FfiConverterBool.lower(isSpace),
+        FfiConverterUInt32.lower(maxSplats),uniffiCallStatus
+    )
+})
+}
+/**
  * Plans `prompt` without meshing (`{ok, understood, notes, program}`).
  */
 public func planText(prompt: String, seed: UInt32) -> String  {
@@ -1747,6 +1883,17 @@ public func planText(prompt: String, seed: UInt32) -> String  {
     uniffi_sculpt_engine_fn_func_plan_text(
         FfiConverterString.lower(prompt),
         FfiConverterUInt32.lower(seed),uniffiCallStatus
+    )
+})
+}
+/**
+ * Imports standard 3DGS `.ply` (binary little-endian or ASCII) into compact `.splat` bytes.
+ */
+public func plyToSplat(plyBytes: Data)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_func_ply_to_splat(
+        FfiConverterData.lower(plyBytes),uniffiCallStatus
     )
 })
 }
@@ -1782,6 +1929,52 @@ public func renderSnapshot(objects: [SnapshotObject], cameraJson: String, width:
 })
 }
 /**
+ * Fast O(N) radix sort of splats back-to-front relative to a camera position and forward vector.
+ */
+public func sortSplats(splatBytes: Data, camPos: [Float], camForward: [Float])throws  -> [UInt32]  {
+    return try  FfiConverterSequenceUInt32.lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_func_sort_splats(
+        FfiConverterData.lower(splatBytes),
+        FfiConverterSequenceFloat.lower(camPos),
+        FfiConverterSequenceFloat.lower(camForward),uniffiCallStatus
+    )
+})
+}
+/**
+ * Returns JSON statistics (`count`, `boundsMin`, `boundsMax`, `center`, `size`, `avgOpacity`, `splatBytes`).
+ */
+public func splatStats(splatBytes: Data)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_func_splat_stats(
+        FfiConverterData.lower(splatBytes),uniffiCallStatus
+    )
+})
+}
+/**
+ * Packs `.splat` (32 B/splat) into ultra-compact `.dsplat` v2 (12 B/splat, 2.67x smaller than .splat).
+ */
+public func splatToCompact(splatBytes: Data)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_func_splat_to_compact(
+        FfiConverterData.lower(splatBytes),uniffiCallStatus
+    )
+})
+}
+/**
+ * Converts compact `.splat` bytes to standard 3DGS binary `.ply` bytes.
+ */
+public func splatToPly(splatBytes: Data)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_func_splat_to_ply(
+        FfiConverterData.lower(splatBytes),uniffiCallStatus
+    )
+})
+}
+/**
  * Text to 3D (src/text3d): plans and meshes `prompt`. JSON in and out, see `text3d::host::generate_json`.
  */
 public func textTo3d(prompt: String, optionsJson: String) -> String  {
@@ -1809,13 +2002,31 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
+    if (uniffi_sculpt_engine_checksum_func_compact_to_splat() != 23341) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_sculpt_engine_checksum_func_draw3d_from_points() != 6254) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_func_edit_splat_prompt() != 47357) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_func_image_to_3d() != 52351) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_func_image_to_splat() != 63580) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sculpt_engine_checksum_func_mesh_program() != 47970) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_sculpt_engine_checksum_func_mesh_to_splat() != 25169) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_sculpt_engine_checksum_func_plan_text() != 23715) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_func_ply_to_splat() != 37063) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sculpt_engine_checksum_func_program_prompt() != 41239) {
@@ -1825,6 +2036,18 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sculpt_engine_checksum_func_render_snapshot() != 39699) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_func_sort_splats() != 30388) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_func_splat_stats() != 41222) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_func_splat_to_compact() != 6772) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_func_splat_to_ply() != 52477) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sculpt_engine_checksum_func_text_to_3d() != 32481) {

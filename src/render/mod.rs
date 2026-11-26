@@ -8,8 +8,8 @@ use crate::camera::OrbitCamera;
 use crate::format::{Material, ProjectFile};
 use crate::mesh::SculptMesh;
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, Vec3};
-use std::sync::Arc;
+use glam::{Mat4, Vec3, Vec3A, Vec4};
+use std::sync::{Arc, OnceLock};
 use wgpu::util::DeviceExt;
 
 /// What the adapter can do (DESIGN.md section 3).
@@ -138,11 +138,58 @@ struct GpuObject {
     ubuf: wgpu::Buffer,
     bind: wgpu::BindGroup,
     world: Mat4,
+    /// Cached inverse-transpose of `world` so material/highlight updates never invert a 4x4 matrix.
+    normal_mat: [[f32; 4]; 4],
     material: Material,
     highlight: bool,
     visible: bool,
     local_bounds: (Vec3, Vec3),
     bounds: (Vec3, Vec3),
+}
+
+/// Process-wide cached studio IBL (procedural and deterministic, so multiple `Renderer` instances
+/// pay CPU prefiltering cost only once).
+struct BakedStudioIbl {
+    sh_packed: [[f32; 4]; 9],
+    env_bytes: Vec<u8>,
+    lut_bytes: Vec<u8>,
+}
+
+fn baked_studio_ibl() -> &'static BakedStudioIbl {
+    static CACHE: OnceLock<BakedStudioIbl> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        const SH_BASIS_SCALE: [f32; 9] = [
+            0.282095, 0.488603, 0.488603, 0.488603, 1.092548, 1.092548, 0.315392, 1.092548, 0.546274,
+        ];
+        let sh = ibl::sh9(ibl::studio);
+        let sh_packed: [[f32; 4]; 9] = std::array::from_fn(|k| (sh[k] * SH_BASIS_SCALE[k]).extend(0.0).to_array());
+
+        let cube = ibl::prefilter(&ibl::studio);
+        let total_texels: usize = (0..ibl::CUBE_MIPS).map(|m| {
+            let s = (ibl::CUBE_SIZE >> m).max(1) as usize;
+            s * s * 6
+        }).sum();
+        let mut env_bytes = Vec::with_capacity(total_texels * 8);
+        // Layer major then mip, as wgpu's TextureDataOrder::LayerMajor expects.
+        for face in 0..6 {
+            for mip in &cube {
+                for t in &mip[face] {
+                    for c in t {
+                        env_bytes.extend_from_slice(&ibl::f16(*c).to_le_bytes());
+                    }
+                }
+            }
+        }
+
+        let lut_raw = ibl::brdf_lut();
+        let mut lut_bytes = Vec::with_capacity(lut_raw.len() * 8);
+        for v in &lut_raw {
+            for h in [ibl::f16(v[0]), ibl::f16(v[1]), 0u16, 0x3c00u16] {
+                lut_bytes.extend_from_slice(&h.to_le_bytes());
+            }
+        }
+        BakedStudioIbl { sh_packed, env_bytes, lut_bytes }
+    })
 }
 
 /// Size dependent targets.
@@ -184,8 +231,10 @@ pub struct Renderer {
     p_line: wgpu::RenderPipeline,
     p_ssao: wgpu::RenderPipeline,
     p_blur: wgpu::RenderPipeline,
-    /// Tone map pipelines per output format (the surface's, plus RGBA8 for snapshots).
-    p_tone: std::collections::HashMap<wgpu::TextureFormat, wgpu::RenderPipeline>,
+    /// Primary tone map pipeline for `self.format` (avoids per-frame HashMap lookups).
+    p_tone_primary: wgpu::RenderPipeline,
+    /// Secondary tone map pipelines for alternate output formats (e.g. RGBA8 snapshots).
+    p_tone_extra: std::collections::HashMap<wgpu::TextureFormat, wgpu::RenderPipeline>,
     post: wgpu::ShaderModule,
     lo_tone: wgpu::PipelineLayout,
     shadow_view: wgpu::TextureView,
@@ -193,13 +242,22 @@ pub struct Renderer {
     linear: wgpu::Sampler,
     env_view: wgpu::TextureView,
     lut_view: wgpu::TextureView,
-    sh: [Vec3; 9],
+    /// Pre-packed, basis-scaled SH irradiance coefficients ready for `FrameU`.
+    sh_packed: [[f32; 4]; 9],
     grid: (wgpu::Buffer, u32),
     objects: Vec<GpuObject>,
     targets: Option<Targets>,
     /// Re-render the shadow map only when geometry, placement or the light changes.
     shadow_dirty: bool,
-    /// Reusable vertex staging buffer for partial GPU uploads during sculpt strokes.
+    /// Cached scene bounds and derived shadow frustum (`light_vp`, `ground_z`), invalidated on scene changes.
+    bounds_dirty: bool,
+    cached_bounds: (Vec3, Vec3),
+    cached_light_vp: [[f32; 4]; 4],
+    cached_ground_z: f32,
+    /// Cached linear background conversion so `srgb_to_linear` (`powf`) only runs when background changes.
+    last_bg_srgb: [f32; 3],
+    last_bg_linear: [f32; 3],
+    /// Reusable vertex staging buffer for upserts and partial GPU uploads during sculpt strokes.
     vertex_staging: Vec<Vertex>,
     /// Sub pixel jitter and kernel rotation, for progressive accumulation (E6); zero when interactive.
     pub jitter: [f32; 4],
@@ -357,7 +415,7 @@ impl Renderer {
         let l_empty = d.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("empty"), entries: &[] });
         let p_blur = pipe("blur", &layout(&[&l_empty, &l_blur]), &post, "vs_full", Some("fs_blur"), &[], &ao_target, tri, None, 1);
         let lo_tone = layout(&[&l_frame, &l_tone]);
-        let p_tone = std::collections::HashMap::from([(format, tone_pipeline(d, &lo_tone, &post, format))]);
+        let p_tone_primary = tone_pipeline(d, &lo_tone, &post, format);
 
         let frame_buf = d.create_buffer(&wgpu::BufferDescriptor {
             label: Some("frame"),
@@ -384,20 +442,8 @@ impl Renderer {
             ..Default::default()
         });
 
-        // IBL from the procedural studio.
-        let sh = ibl::sh9(ibl::studio);
-        let cube = ibl::prefilter(&ibl::studio);
-        let mut bytes = Vec::new();
-        // Layer major then mip, as wgpu's TextureDataOrder::LayerMajor expects.
-        for face in 0..6 {
-            for mip in &cube {
-                for t in &mip[face] {
-                    for c in t {
-                        bytes.extend_from_slice(&ibl::f16(*c).to_le_bytes());
-                    }
-                }
-            }
-        }
+        // IBL from the procedural studio (baked once per process, uploaded to this device).
+        let baked = baked_studio_ibl();
         let env = d.create_texture_with_data(
             &gpu.queue,
             &wgpu::TextureDescriptor {
@@ -411,10 +457,9 @@ impl Renderer {
                 view_formats: &[],
             },
             wgpu::util::TextureDataOrder::LayerMajor,
-            &bytes,
+            &baked.env_bytes,
         );
         let env_view = env.create_view(&wgpu::TextureViewDescriptor { dimension: Some(wgpu::TextureViewDimension::Cube), ..Default::default() });
-        let lut: Vec<u8> = ibl::brdf_lut().iter().flat_map(|v| [ibl::f16(v[0]), ibl::f16(v[1]), 0, 0x3c00]).flat_map(|h| h.to_le_bytes()).collect();
         let lut_view = d
             .create_texture_with_data(
                 &gpu.queue,
@@ -429,14 +474,17 @@ impl Renderer {
                     view_formats: &[],
                 },
                 wgpu::util::TextureDataOrder::LayerMajor,
-                &lut,
+                &baked.lut_bytes,
             )
             .create_view(&Default::default());
 
         let grid = grid_lines(d);
+        let settings = RenderSettings::default();
+        let last_bg_srgb = settings.background;
+        let last_bg_linear = last_bg_srgb.map(srgb_to_linear);
         Renderer {
             format,
-            settings: RenderSettings::default(),
+            settings,
             frame_buf,
             frame_bind,
             l_scene,
@@ -451,7 +499,8 @@ impl Renderer {
             p_line,
             p_ssao,
             p_blur,
-            p_tone,
+            p_tone_primary,
+            p_tone_extra: std::collections::HashMap::new(),
             post,
             lo_tone,
             shadow_view,
@@ -459,11 +508,17 @@ impl Renderer {
             linear,
             env_view,
             lut_view,
-            sh,
+            sh_packed: baked.sh_packed,
             grid,
             objects: Vec::new(),
             targets: None,
             shadow_dirty: true,
+            bounds_dirty: true,
+            cached_bounds: (Vec3::splat(-10.0), Vec3::splat(10.0)),
+            cached_light_vp: mat(Mat4::IDENTITY),
+            cached_ground_z: -10.0,
+            last_bg_srgb,
+            last_bg_linear,
             vertex_staging: Vec::new(),
             jitter: [0.0; 4],
             gpu,
@@ -512,108 +567,153 @@ impl Renderer {
     pub fn clear(&mut self) {
         self.objects.clear();
         self.shadow_dirty = true;
+        self.bounds_dirty = true;
     }
 
     /// Adds or replaces an object from a sculpt mesh (evaluated, modifiers applied, by the host).
     pub fn upsert(&mut self, id: &str, mesh: &SculptMesh, world: Mat4, material: &Material) {
         let d = &self.gpu.device;
+        let existing_idx = self.objects.iter().position(|x| x.id == id);
+
         let (vbuf, ibuf, count) = if mesh.smooth_shading {
-            let v: Vec<Vertex> = mesh
-                .positions
-                .iter()
-                .enumerate()
-                .map(|(k, p)| Vertex {
-                    pos: p.to_array(),
-                    nrm: mesh.normals[k].to_array(),
-                    mask: mesh.masks.get(k).copied().unwrap_or(0.0),
-                })
-                .collect();
-            let idx: Vec<u32> = mesh.tris.iter().flatten().copied().collect();
-            (
-                d.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(id), contents: bytemuck::cast_slice(&v), usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST }),
-                Some(d.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(id), contents: bytemuck::cast_slice(&idx), usage: wgpu::BufferUsages::INDEX })),
-                idx.len() as u32,
-            )
+            fill_smooth_vertices(&mut self.vertex_staging, mesh, 0..mesh.positions.len());
+            let vbytes = bytemuck::cast_slice(&self.vertex_staging);
+            // Reuse existing GPU vertex buffer when byte size matches to avoid VRAM churn on live edits.
+            let reuse_vbuf = existing_idx
+                .map(|idx| self.objects[idx].vbuf.size() == vbytes.len() as u64)
+                .unwrap_or(false);
+            let vbuf = if reuse_vbuf {
+                let idx = existing_idx.unwrap();
+                self.gpu.queue.write_buffer(&self.objects[idx].vbuf, 0, vbytes);
+                None
+            } else {
+                Some(d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(id),
+                    contents: vbytes,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                }))
+            };
+            // `mesh.tris` is `&[[u32; 3]]` (tightly packed Pod): zero-copy upload, no flattened Vec<u32>!
+            let ibytes: &[u8] = bytemuck::cast_slice(&mesh.tris);
+            let ibuf = Some(d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(id),
+                contents: ibytes,
+                usage: wgpu::BufferUsages::INDEX,
+            }));
+            (vbuf, ibuf, (mesh.tris.len() * 3) as u32)
         } else {
-            let v = flat_vertices(mesh);
-            (
-                d.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(id), contents: bytemuck::cast_slice(&v), usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST }),
-                None,
-                v.len() as u32,
-            )
+            fill_flat_vertices(&mut self.vertex_staging, mesh);
+            let vbytes = bytemuck::cast_slice(&self.vertex_staging);
+            let reuse_vbuf = existing_idx
+                .map(|idx| self.objects[idx].vbuf.size() == vbytes.len() as u64)
+                .unwrap_or(false);
+            let vbuf = if reuse_vbuf {
+                let idx = existing_idx.unwrap();
+                self.gpu.queue.write_buffer(&self.objects[idx].vbuf, 0, vbytes);
+                None
+            } else {
+                Some(d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(id),
+                    contents: vbytes,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                }))
+            };
+            (vbuf, None, self.vertex_staging.len() as u32)
         };
-        let ubuf = d.create_buffer(&wgpu::BufferDescriptor { label: Some(id), size: std::mem::size_of::<ObjectU>() as u64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
-        let bind = d.create_bind_group(&wgpu::BindGroupDescriptor { label: Some(id), layout: &self.l_object, entries: &[wgpu::BindGroupEntry { binding: 0, resource: ubuf.as_entire_binding() }] });
+
         let local_bounds = local_bounds(&mesh.positions);
-        let bounds = world_bounds(&mesh.positions, world);
-        let o = GpuObject {
-            id: id.into(),
-            vbuf,
-            ibuf,
-            count,
-            smooth: mesh.smooth_shading,
-            ubuf,
-            bind,
-            world,
-            material: material.clone(),
-            highlight: false,
-            visible: true,
-            local_bounds,
-            bounds,
-        };
-        self.write_object(&o);
-        match self.objects.iter().position(|x| x.id == id) {
-            Some(i) => self.objects[i] = o,
-            None => self.objects.push(o),
+        let bounds = if world == Mat4::IDENTITY { local_bounds } else { world_bounds(&mesh.positions, world) };
+        let normal_mat = compute_normal_mat(world);
+
+        if let Some(idx) = existing_idx {
+            let o = &mut self.objects[idx];
+            if let Some(vb) = vbuf {
+                o.vbuf = vb;
+            }
+            o.ibuf = ibuf;
+            o.count = count;
+            o.smooth = mesh.smooth_shading;
+            o.world = world;
+            o.normal_mat = normal_mat;
+            o.material = material.clone();
+            o.highlight = false;
+            o.visible = true;
+            o.local_bounds = local_bounds;
+            o.bounds = bounds;
+            write_object_u(&self.gpu.queue, o);
+        } else {
+            let ubuf = d.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(id),
+                size: std::mem::size_of::<ObjectU>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let bind = d.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(id),
+                layout: &self.l_object,
+                entries: &[wgpu::BindGroupEntry { binding: 0, resource: ubuf.as_entire_binding() }],
+            });
+            let o = GpuObject {
+                id: id.into(),
+                vbuf: vbuf.unwrap(),
+                ibuf,
+                count,
+                smooth: mesh.smooth_shading,
+                ubuf,
+                bind,
+                world,
+                normal_mat,
+                material: material.clone(),
+                highlight: false,
+                visible: true,
+                local_bounds,
+                bounds,
+            };
+            write_object_u(&self.gpu.queue, &o);
+            self.objects.push(o);
         }
         self.shadow_dirty = true;
-    }
-
-    fn write_object(&self, o: &GpuObject) {
-        let c = o.material.base_color;
-        let u = ObjectU {
-            model: mat(o.world),
-            normal_mat: mat(o.world.inverse().transpose()),
-            base_color: [srgb_to_linear(c.r), srgb_to_linear(c.g), srgb_to_linear(c.b), c.a],
-            mr: [o.material.metallic, o.material.roughness, if o.highlight { 1.0 } else { 0.0 }, 0.0],
-        };
-        self.gpu.queue.write_buffer(&o.ubuf, 0, bytemuck::bytes_of(&u));
+        self.bounds_dirty = true;
     }
 
     /// Uploads moved vertices after a dab. Smooth meshes upload only the changed index range.
     pub fn update_vertices(&mut self, id: &str, mesh: &SculptMesh, dirty: &[u32]) {
         let Some(i) = self.objects.iter().position(|x| x.id == id) else { return };
-        let o = &mut self.objects[i];
         if dirty.is_empty() {
             return;
         }
-        // `dirty` holds moved vertices and the ring whose normals changed (SculptTarget::take_dirty).
-        let (lo, hi) = (*dirty.iter().min().unwrap() as usize, *dirty.iter().max().unwrap() as usize);
+        // Single-pass min/max over `dirty` (moved vertices + 1-ring whose normals changed).
+        let mut lo = u32::MAX;
+        let mut hi = 0u32;
+        for &idx in dirty {
+            lo = lo.min(idx);
+            hi = hi.max(idx);
+        }
+        let (lo, hi) = (lo as usize, hi as usize);
+        let o = &mut self.objects[i];
         if o.smooth && hi < mesh.positions.len() && (o.vbuf.size() as usize) == mesh.positions.len() * std::mem::size_of::<Vertex>() {
             // Reuse vertex staging buffer across dabs to eliminate per-dab heap allocations.
-            self.vertex_staging.clear();
-            self.vertex_staging.reserve(hi - lo + 1);
-            for k in lo..=hi {
-                self.vertex_staging.push(Vertex {
-                    pos: mesh.positions[k].to_array(),
-                    nrm: mesh.normals[k].to_array(),
-                    mask: mesh.masks.get(k).copied().unwrap_or(0.0),
-                });
-            }
+            fill_smooth_vertices(&mut self.vertex_staging, mesh, lo..hi + 1);
             self.gpu.queue.write_buffer(&o.vbuf, (lo * std::mem::size_of::<Vertex>()) as u64, bytemuck::cast_slice(&self.vertex_staging));
         } else {
-            // shortcut: flat shaded meshes re-upload every corner; sculpting normally runs on smooth meshes.
-            let v = flat_vertices(mesh);
-            self.gpu.queue.write_buffer(&o.vbuf, 0, bytemuck::cast_slice(&v));
+            // Flat shaded meshes re-upload every corner via the reusable staging buffer.
+            fill_flat_vertices(&mut self.vertex_staging, mesh);
+            self.gpu.queue.write_buffer(&o.vbuf, 0, bytemuck::cast_slice(&self.vertex_staging));
         }
         o.local_bounds = local_bounds(&mesh.positions);
-        o.bounds = world_bounds(&mesh.positions, o.world);
+        // Transform the 8 AABB corners (same as `set_transform`) instead of transforming every vertex.
+        o.bounds = if o.world == Mat4::IDENTITY { o.local_bounds } else { box_world_bounds(o.local_bounds, o.world) };
         self.shadow_dirty = true;
+        self.bounds_dirty = true;
     }
 
     pub fn remove(&mut self, id: &str) {
+        let before = self.objects.len();
         self.objects.retain(|o| o.id != id);
-        self.shadow_dirty = true;
+        if self.objects.len() != before {
+            self.shadow_dirty = true;
+            self.bounds_dirty = true;
+        }
     }
 
     pub fn set_transform(&mut self, id: &str, world: Mat4) -> bool {
@@ -621,17 +721,24 @@ impl Renderer {
         if self.objects[i].world == world {
             return true;
         }
-        self.objects[i].world = world;
-        self.objects[i].bounds = box_world_bounds(self.objects[i].local_bounds, world);
-        self.write_object(&self.objects[i]);
+        let o = &mut self.objects[i];
+        o.world = world;
+        o.normal_mat = compute_normal_mat(world);
+        o.bounds = if world == Mat4::IDENTITY { o.local_bounds } else { box_world_bounds(o.local_bounds, world) };
+        write_object_u(&self.gpu.queue, o);
         self.shadow_dirty = true;
+        self.bounds_dirty = true;
         true
     }
 
     pub fn set_material(&mut self, id: &str, material: &Material) -> bool {
         let Some(i) = self.objects.iter().position(|x| x.id == id) else { return false };
-        self.objects[i].material = material.clone();
-        self.write_object(&self.objects[i]);
+        let o = &mut self.objects[i];
+        if o.material == *material {
+            return true;
+        }
+        o.material = material.clone();
+        write_object_u(&self.gpu.queue, o);
         true
     }
 
@@ -640,6 +747,7 @@ impl Renderer {
         if self.objects[i].visible != visible {
             self.objects[i].visible = visible;
             self.shadow_dirty = true;
+            self.bounds_dirty = true;
         }
         true
     }
@@ -648,7 +756,7 @@ impl Renderer {
         if let Some(i) = self.objects.iter().position(|x| x.id == id) {
             if self.objects[i].highlight != on {
                 self.objects[i].highlight = on;
-                self.write_object(&self.objects[i]);
+                write_object_u(&self.gpu.queue, &self.objects[i]);
             }
         }
     }
@@ -663,62 +771,76 @@ impl Renderer {
     }
 
     pub fn scene_bounds(&self) -> (Vec3, Vec3) {
-        let mut b = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
-        for o in &self.objects {
-            if !o.visible {
-                continue;
-            }
-            b.0 = b.0.min(o.bounds.0);
-            b.1 = b.1.max(o.bounds.1);
+        if !self.bounds_dirty {
+            return self.cached_bounds;
         }
-        if b.0.x > b.1.x { (Vec3::splat(-10.0), Vec3::splat(10.0)) } else { b }
+        compute_scene_bounds(&self.objects)
+    }
+
+    fn refresh_scene_cache(&mut self) {
+        if !self.bounds_dirty {
+            return;
+        }
+        let (bmin, bmax) = compute_scene_bounds(&self.objects);
+        self.cached_bounds = (bmin, bmax);
+        self.cached_ground_z = bmin.z.min(0.0);
+        // Light frustum around the scene and the ground near it.
+        let center = (bmin + bmax) * 0.5;
+        let radius = ((bmax - bmin).length() * 0.5).max(10.0) * 1.4;
+        let l = ibl::KEY_DIR_NORM;
+        let up = if l.z.abs() > 0.99 { Vec3::Y } else { Vec3::Z };
+        let lview = look_at_rh(center + l * (radius * 2.0), center, up);
+        let lproj = ortho_rh(radius, radius * 4.0);
+        self.cached_light_vp = mat(lproj * lview);
+        self.bounds_dirty = false;
     }
 
     // ---- frame ----
 
-    fn frame_uniforms(&self, cam: &OrbitCamera, size: (u32, u32), format: wgpu::TextureFormat) -> FrameU {
+    fn frame_uniforms(&mut self, cam: &OrbitCamera, size: (u32, u32), format: wgpu::TextureFormat) -> (FrameU, Mat4) {
+        self.refresh_scene_cache();
         let s = &self.settings;
+        if self.last_bg_srgb != s.background {
+            self.last_bg_srgb = s.background;
+            self.last_bg_linear = s.background.map(srgb_to_linear);
+        }
         let aspect = size.0 as f32 / size.1.max(1) as f32;
         let view = cam.render_view_matrix();
         let proj = cam.projection_matrix(aspect);
-        let (bmin, bmax) = self.scene_bounds();
-        let ground_z = bmin.z.min(0.0);
-        // Light frustum around the scene and the ground near it.
-        let center = (bmin + bmax) * 0.5;
-        let radius = ((bmax - bmin).length() * 0.5).max(10.0) * 1.4;
-        let l = ibl::KEY_DIR.normalize();
-        let up = if l.z.abs() > 0.99 { Vec3::Y } else { Vec3::Z };
-        let lview = look_at_rh(center + l * radius * 2.0, center, up);
-        let lproj = ortho_rh(radius, radius * 4.0);
-        let mut sh = [[0.0; 4]; 9];
-        for k in 0..9 {
-            sh[k] = self.sh[k].extend(0.0).to_array();
-        }
+        let view_proj = proj * view;
+        let inv_proj = fast_inv_proj(proj);
+        let cam_pos = view_eye_from_matrix(view);
         let encode = !format.is_srgb();
-        let bg = s.background.map(srgb_to_linear);
-        FrameU {
-            view_proj: mat(proj * view),
+        let bg = self.last_bg_linear;
+        let u = FrameU {
+            view_proj: mat(view_proj),
             view: mat(view),
             proj: mat(proj),
-            inv_proj: mat(proj.inverse()),
-            light_vp: mat(lproj * lview),
-            cam_pos: cam.render_eye().extend(1.0).to_array(),
-            light_dir: l.extend(0.0).to_array(),
+            inv_proj: mat(inv_proj),
+            light_vp: self.cached_light_vp,
+            cam_pos: cam_pos.extend(1.0).to_array(),
+            light_dir: ibl::KEY_DIR_NORM.extend(0.0).to_array(),
             light_color: [s.key_light, s.key_light * 0.97, s.key_light * 0.93, 0.0],
             background: [bg[0], bg[1], bg[2], 1.0],
             viewport: [size.0 as f32, size.1 as f32, 1.0 / size.0 as f32, 1.0 / size.1 as f32],
             params: [s.exposure, s.ssao as u32 as f32, s.shadows as u32 as f32, (ibl::CUBE_MIPS - 1) as f32],
-            params2: [s.tonemap as u32 as f32, encode as u32 as f32, ground_z, s.ssao_radius_mm],
+            params2: [s.tonemap as u32 as f32, encode as u32 as f32, self.cached_ground_z, s.ssao_radius_mm],
             jitter: self.jitter,
-            sh,
+            sh: self.sh_packed,
             debug: [s.debug_ao as u32 as f32, 0.0, 0.0, 0.0],
-        }
+        };
+        (u, view_proj)
     }
 
-    fn draw_objects<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
+    fn draw_objects<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, frustum: Option<&Frustum>) {
         for o in &self.objects {
             if !o.visible {
                 continue;
+            }
+            if let Some(f) = frustum {
+                if !f.intersects_aabb(o.bounds.0, o.bounds.1) {
+                    continue;
+                }
             }
             pass.set_bind_group(1, &o.bind, &[]);
             pass.set_vertex_buffer(0, o.vbuf.slice(..));
@@ -740,41 +862,44 @@ impl Renderer {
     /// Draws one frame into a view of any color format.
     pub fn render_as(&mut self, target: &wgpu::TextureView, format: wgpu::TextureFormat, size: (u32, u32), cam: &OrbitCamera) {
         self.ensure_targets(size);
-        if !self.p_tone.contains_key(&format) {
+        if format != self.format && !self.p_tone_extra.contains_key(&format) {
             let p = tone_pipeline(&self.gpu.device, &self.lo_tone, &self.post, format);
-            self.p_tone.insert(format, p);
+            self.p_tone_extra.insert(format, p);
         }
-        let u = self.frame_uniforms(cam, size, format);
+        let (u, view_proj) = self.frame_uniforms(cam, size, format);
         self.gpu.queue.write_buffer(&self.frame_buf, 0, bytemuck::bytes_of(&u));
+        let frustum = Frustum::from_view_proj(view_proj, self.jitter[0].abs(), self.jitter[1].abs());
         let mut enc = self.gpu.device.create_command_encoder(&Default::default());
         let t = self.targets.as_ref().unwrap();
-        let clear_depth = |view| Some(wgpu::RenderPassDepthStencilAttachment { view, depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }), stencil_ops: None });
-        let color = |view, resolve, clear: wgpu::Color| wgpu::RenderPassColorAttachment {
+        let clear_depth = |view, store| Some(wgpu::RenderPassDepthStencilAttachment { view, depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store }), stencil_ops: None });
+        let color = |view, resolve, clear: wgpu::Color, store| wgpu::RenderPassColorAttachment {
             view,
             depth_slice: None,
             resolve_target: resolve,
-            ops: wgpu::Operations { load: wgpu::LoadOp::Clear(clear), store: wgpu::StoreOp::Store },
+            ops: wgpu::Operations { load: wgpu::LoadOp::Clear(clear), store },
         };
         fn pass_desc<'a>(label: &'a str, colors: &'a [Option<wgpu::RenderPassColorAttachment<'a>>], depth: Option<wgpu::RenderPassDepthStencilAttachment<'a>>) -> wgpu::RenderPassDescriptor<'a> {
             wgpu::RenderPassDescriptor { label: Some(label), color_attachments: colors, depth_stencil_attachment: depth, timestamp_writes: None, occlusion_query_set: None, multiview_mask: None }
         }
 
-        if self.settings.shadows && self.shadow_dirty {
-            let mut p = enc.begin_render_pass(&pass_desc("shadow", &[], clear_depth(&self.shadow_view)));
+        let rendered_shadow = self.settings.shadows && self.shadow_dirty;
+        if rendered_shadow {
+            let mut p = enc.begin_render_pass(&pass_desc("shadow", &[], clear_depth(&self.shadow_view, wgpu::StoreOp::Store)));
             p.set_pipeline(&self.p_shadow);
             p.set_bind_group(0, &self.frame_bind, &[]);
-            self.draw_objects(&mut p);
+            self.draw_objects(&mut p, None);
         }
         if self.settings.ssao {
             {
-                let c = [Some(color(&t.pre_normal, None, wgpu::Color::TRANSPARENT))];
-                let mut p = enc.begin_render_pass(&pass_desc("prepass", &c, clear_depth(&t.pre_depth)));
+                let c = [Some(color(&t.pre_normal, None, wgpu::Color::TRANSPARENT, wgpu::StoreOp::Store))];
+                // `pre_depth` is never sampled after prepass (depth is packed in `pre_normal.ba`); discard tile memory.
+                let mut p = enc.begin_render_pass(&pass_desc("prepass", &c, clear_depth(&t.pre_depth, wgpu::StoreOp::Discard)));
                 p.set_pipeline(&self.p_prepass);
                 p.set_bind_group(0, &self.frame_bind, &[]);
-                self.draw_objects(&mut p);
+                self.draw_objects(&mut p, Some(&frustum));
             }
             {
-                let c = [Some(color(&t.ssao_raw, None, wgpu::Color::WHITE))];
+                let c = [Some(color(&t.ssao_raw, None, wgpu::Color::WHITE, wgpu::StoreOp::Store))];
                 let mut p = enc.begin_render_pass(&pass_desc("ssao", &c, None));
                 p.set_pipeline(&self.p_ssao);
                 p.set_bind_group(0, &self.frame_bind, &[]);
@@ -782,7 +907,7 @@ impl Renderer {
                 p.draw(0..3, 0..1);
             }
             {
-                let c = [Some(color(&t.ssao, None, wgpu::Color::WHITE))];
+                let c = [Some(color(&t.ssao, None, wgpu::Color::WHITE, wgpu::StoreOp::Store))];
                 let mut p = enc.begin_render_pass(&pass_desc("ssao blur", &c, None));
                 p.set_pipeline(&self.p_blur);
                 p.set_bind_group(1, &t.blur_bind, &[]);
@@ -790,8 +915,10 @@ impl Renderer {
             }
         }
         {
-            let c = [Some(color(&t.hdr_msaa, Some(&t.hdr), wgpu::Color::TRANSPARENT))];
-            let mut p = enc.begin_render_pass(&pass_desc("main", &c, clear_depth(&t.depth_msaa)));
+            // Both `hdr_msaa` (resolved into `t.hdr`) and `depth_msaa` are transient MSAA buffers:
+            // `StoreOp::Discard` keeps them in TBDR tile memory and avoids writing ~100 MB/frame to DRAM.
+            let c = [Some(color(&t.hdr_msaa, Some(&t.hdr), wgpu::Color::TRANSPARENT, wgpu::StoreOp::Discard))];
+            let mut p = enc.begin_render_pass(&pass_desc("main", &c, clear_depth(&t.depth_msaa, wgpu::StoreOp::Discard)));
             p.set_bind_group(0, &t.scene_bind, &[]);
             p.set_pipeline(&self.p_ground);
             p.draw(0..6, 0..1);
@@ -801,18 +928,21 @@ impl Renderer {
                 p.draw(0..self.grid.1, 0..1);
             }
             p.set_pipeline(&self.p_main);
-            self.draw_objects(&mut p);
+            self.draw_objects(&mut p, Some(&frustum));
         }
         {
-            let c = [Some(color(target, None, wgpu::Color::BLACK))];
+            let c = [Some(color(target, None, wgpu::Color::BLACK, wgpu::StoreOp::Store))];
             let mut p = enc.begin_render_pass(&pass_desc("tonemap", &c, None));
-            p.set_pipeline(&self.p_tone[&format]);
+            let tone = if format == self.format { &self.p_tone_primary } else { &self.p_tone_extra[&format] };
+            p.set_pipeline(tone);
             p.set_bind_group(0, &self.frame_bind, &[]);
             p.set_bind_group(1, &t.tone_bind, &[]);
             p.draw(0..3, 0..1);
         }
         self.gpu.queue.submit([enc.finish()]);
-        self.shadow_dirty = false;
+        if rendered_shadow {
+            self.shadow_dirty = false;
+        }
     }
 
     /// Renders offscreen and reads back tightly packed RGBA8 (sRGB) pixels, whatever `self.format` is.
@@ -899,22 +1029,225 @@ fn ortho_rh(half: f32, far: f32) -> Mat4 {
     )
 }
 
-fn flat_vertices(mesh: &SculptMesh) -> Vec<Vertex> {
-    let (p, n, m) = mesh.flat_buffers_masked();
-    p.iter()
-        .zip(&n)
-        .zip(&m)
-        .map(|((p, n), &mask)| Vertex { pos: p.to_array(), nrm: n.to_array(), mask })
-        .collect()
+#[inline]
+fn compute_normal_mat(world: Mat4) -> [[f32; 4]; 4] {
+    if world == Mat4::IDENTITY {
+        Mat4::IDENTITY.to_cols_array_2d()
+    } else {
+        world.inverse().transpose().to_cols_array_2d()
+    }
 }
 
-fn local_bounds(positions: &[Vec3]) -> (Vec3, Vec3) {
+fn write_object_u(queue: &wgpu::Queue, o: &GpuObject) {
+    let c = o.material.base_color;
+    let u = ObjectU {
+        model: mat(o.world),
+        normal_mat: o.normal_mat,
+        base_color: [srgb_to_linear(c.r), srgb_to_linear(c.g), srgb_to_linear(c.b), c.a],
+        mr: [o.material.metallic, o.material.roughness, if o.highlight { 1.0 } else { 0.0 }, 0.0],
+    };
+    queue.write_buffer(&o.ubuf, 0, bytemuck::bytes_of(&u));
+}
+
+fn compute_scene_bounds(objects: &[GpuObject]) -> (Vec3, Vec3) {
     let mut b = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
-    for &p in positions {
-        b.0 = b.0.min(p);
-        b.1 = b.1.max(p);
+    for o in objects {
+        if !o.visible {
+            continue;
+        }
+        b.0 = b.0.min(o.bounds.0);
+        b.1 = b.1.max(o.bounds.1);
     }
-    b
+    if b.0.x > b.1.x { (Vec3::splat(-10.0), Vec3::splat(10.0)) } else { b }
+}
+
+/// Analytic inverse for standard right-handed WebGPU perspective and orthographic projections
+/// (avoids a full 4x4 LU inversion per frame), with exact fallback to `Mat4::inverse`.
+#[inline]
+fn fast_inv_proj(p: Mat4) -> Mat4 {
+    let c = p.to_cols_array_2d();
+    let (x, y, z, zn) = (c[0][0], c[1][1], c[2][2], c[3][2]);
+    // Standard perspective: col2.w == -1, col3.w == 0, off-diagonals 0.
+    if c[2][3] == -1.0 && c[3][3] == 0.0 && x != 0.0 && y != 0.0 && zn != 0.0 {
+        let inv_zn = 1.0 / zn;
+        return Mat4::from_cols(
+            Vec4::new(1.0 / x, 0.0, 0.0, 0.0),
+            Vec4::new(0.0, 1.0 / y, 0.0, 0.0),
+            Vec4::new(0.0, 0.0, 0.0, inv_zn),
+            Vec4::new(0.0, 0.0, -1.0, z * inv_zn),
+        );
+    }
+    // Standard orthographic: col2.w == 0, col3.w == 1, off-diagonals 0.
+    if c[2][3] == 0.0 && c[3][3] == 1.0 && x != 0.0 && y != 0.0 && z != 0.0 {
+        let inv_z = 1.0 / z;
+        return Mat4::from_cols(
+            Vec4::new(1.0 / x, 0.0, 0.0, 0.0),
+            Vec4::new(0.0, 1.0 / y, 0.0, 0.0),
+            Vec4::new(0.0, 0.0, inv_z, 0.0),
+            Vec4::new(0.0, 0.0, -zn * inv_z, 1.0),
+        );
+    }
+    p.inverse()
+}
+
+/// Extracts world-space camera eye directly from an orthonormal view matrix (zero trig calls).
+#[inline]
+fn view_eye_from_matrix(v: Mat4) -> Vec3 {
+    let t = v.w_axis.truncate();
+    Vec3::new(-v.x_axis.truncate().dot(t), -v.y_axis.truncate().dot(t), -v.z_axis.truncate().dot(t))
+}
+
+/// Six clip-space frustum planes (WebGPU depth 0..1) extracted via Gribb-Hartmann.
+struct Frustum {
+    planes: [Vec4; 6],
+}
+
+impl Frustum {
+    #[inline]
+    fn from_view_proj(vp: Mat4, jx: f32, jy: f32) -> Self {
+        let r0 = vp.row(0);
+        let r1 = vp.row(1);
+        let r2 = vp.row(2);
+        let r3 = vp.row(3);
+        let sx = 1.0 + jx;
+        let sy = 1.0 + jy;
+        Self {
+            planes: [
+                r3 * sx + r0, // left:   x >= -w*(1+jx)
+                r3 * sx - r0, // right:  x <=  w*(1+jx)
+                r3 * sy + r1, // bottom: y >= -w*(1+jy)
+                r3 * sy - r1, // top:    y <=  w*(1+jy)
+                r2,           // near:   z >= 0
+                r3 - r2,      // far:    z <= w
+            ],
+        }
+    }
+
+    /// True if the world-space AABB `[lo, hi]` intersects or lies inside the frustum.
+    #[inline]
+    fn intersects_aabb(&self, lo: Vec3, hi: Vec3) -> bool {
+        if lo.x > hi.x {
+            return false;
+        }
+        for p in &self.planes {
+            let px = if p.x >= 0.0 { hi.x } else { lo.x };
+            let py = if p.y >= 0.0 { hi.y } else { lo.y };
+            let pz = if p.z >= 0.0 { hi.z } else { lo.z };
+            if p.x * px + p.y * py + p.z * pz + p.w < 0.0 {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+/// Packs smooth vertices into a reusable staging buffer with hoisted mask check (zero per-vertex bounds checks).
+fn fill_smooth_vertices(dst: &mut Vec<Vertex>, mesh: &SculptMesh, range: std::ops::Range<usize>) {
+    dst.clear();
+    let count = range.end.saturating_sub(range.start);
+    dst.reserve(count);
+    let pos = &mesh.positions[range.clone()];
+    let nrm = &mesh.normals[range.clone()];
+    if mesh.masks.len() >= range.end {
+        let msk = &mesh.masks[range];
+        for ((p, n), &mask) in pos.iter().zip(nrm).zip(msk) {
+            dst.push(Vertex { pos: p.to_array(), nrm: n.to_array(), mask });
+        }
+    } else if mesh.masks.is_empty() {
+        for (p, n) in pos.iter().zip(nrm) {
+            dst.push(Vertex { pos: p.to_array(), nrm: n.to_array(), mask: 0.0 });
+        }
+    } else {
+        for (offset, (p, n)) in pos.iter().zip(nrm).enumerate() {
+            let mask = mesh.masks.get(range.start + offset).copied().unwrap_or(0.0);
+            dst.push(Vertex { pos: p.to_array(), nrm: n.to_array(), mask });
+        }
+    }
+}
+
+/// Packs flat-shaded vertices directly into a reusable staging buffer without intermediate position/normal/mask Vecs.
+fn fill_flat_vertices(dst: &mut Vec<Vertex>, mesh: &SculptMesh) {
+    dst.clear();
+    dst.reserve(mesh.tris.len() * 3);
+    let positions = &mesh.positions;
+    let masks = &mesh.masks;
+    let full_masks = masks.len() >= positions.len();
+    let mut t = 0usize;
+    for p in 0..mesh.poly_count() {
+        let row = mesh.polys.row(p);
+        let n = match row.len() {
+            3 => {
+                let p0 = positions[row[0] as usize];
+                let p1 = positions[row[1] as usize];
+                let p2 = positions[row[2] as usize];
+                (p1 - p0).cross(p2 - p0).normalize_or_zero().to_array()
+            }
+            4 => {
+                let p0 = positions[row[0] as usize];
+                let p1 = positions[row[1] as usize];
+                let p2 = positions[row[2] as usize];
+                let p3 = positions[row[3] as usize];
+                (p2 - p0).cross(p3 - p1).normalize_or_zero().to_array()
+            }
+            _ => {
+                let mut acc = Vec3::ZERO;
+                let mut a = positions[row[row.len() - 1] as usize];
+                for &idx in row {
+                    let b = positions[idx as usize];
+                    acc.x += (a.y - b.y) * (a.z + b.z);
+                    acc.y += (a.z - b.z) * (a.x + b.x);
+                    acc.z += (a.x - b.x) * (a.y + b.y);
+                    a = b;
+                }
+                acc.normalize_or_zero().to_array()
+            }
+        };
+        let fan_tris = row.len().saturating_sub(2);
+        if full_masks {
+            for tri in &mesh.tris[t..t + fan_tris] {
+                for &v in tri {
+                    let vi = v as usize;
+                    dst.push(Vertex { pos: positions[vi].to_array(), nrm: n, mask: masks[vi] });
+                }
+            }
+        } else {
+            for tri in &mesh.tris[t..t + fan_tris] {
+                for &v in tri {
+                    let vi = v as usize;
+                    dst.push(Vertex { pos: positions[vi].to_array(), nrm: n, mask: masks.get(vi).copied().unwrap_or(0.0) });
+                }
+            }
+        }
+        t += fan_tris;
+    }
+}
+
+/// 4-way unrolled SIMD AABB computation for high-throughput sculpt dab updates.
+fn local_bounds(positions: &[Vec3]) -> (Vec3, Vec3) {
+    let mut lo0 = Vec3A::splat(f32::INFINITY);
+    let mut hi0 = Vec3A::splat(f32::NEG_INFINITY);
+    let mut lo1 = lo0;
+    let mut hi1 = hi0;
+    let chunks = positions.chunks_exact(4);
+    let rem = chunks.remainder();
+    for c in chunks {
+        let p0 = Vec3A::from(c[0]);
+        let p1 = Vec3A::from(c[1]);
+        let p2 = Vec3A::from(c[2]);
+        let p3 = Vec3A::from(c[3]);
+        lo0 = lo0.min(p0).min(p1);
+        hi0 = hi0.max(p0).max(p1);
+        lo1 = lo1.min(p2).min(p3);
+        hi1 = hi1.max(p2).max(p3);
+    }
+    let mut lo = lo0.min(lo1);
+    let mut hi = hi0.max(hi1);
+    for &p in rem {
+        let pa = Vec3A::from(p);
+        lo = lo.min(pa);
+        hi = hi.max(pa);
+    }
+    (Vec3::from(lo), Vec3::from(hi))
 }
 
 fn box_world_bounds((lo, hi): (Vec3, Vec3), world: Mat4) -> (Vec3, Vec3) {
@@ -982,4 +1315,60 @@ fn grid_lines(d: &wgpu::Device) -> (wgpu::Buffer, u32) {
     line([0.0, -half, 0.0], [0.0, half, 0.0], [0.45, 0.75, 0.15, 0.7]);
     let buf = d.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("grid"), contents: bytemuck::cast_slice(&v), usage: wgpu::BufferUsages::VERTEX });
     (buf, v.len() as u32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mesh::uv_sphere;
+
+    #[test]
+    fn fast_inv_proj_and_view_eye_match_exact() {
+        for ortho in [false, true] {
+            let cam = OrbitCamera {
+                target: [12.0, -5.0, 8.0],
+                distance: 135.0,
+                yaw_degrees: 42.0,
+                pitch_degrees: 27.0,
+                fov_degrees: 50.0,
+                is_orthographic: ortho,
+            };
+            let proj = cam.projection_matrix(16.0 / 9.0);
+            let fast = fast_inv_proj(proj);
+            let exact = proj.inverse();
+            for (a, b) in fast.to_cols_array().iter().zip(exact.to_cols_array().iter()) {
+                assert!((a - b).abs() < 1e-4 * (1.0 + b.abs()), "ortho={ortho}: {a} vs {b}");
+            }
+            let view = cam.render_view_matrix();
+            let eye_fast = view_eye_from_matrix(view);
+            let eye_exact = cam.render_eye();
+            assert!((eye_fast - eye_exact).length() < 1e-2, "ortho={ortho}: {eye_fast} vs {eye_exact}");
+        }
+    }
+
+    #[test]
+    fn frustum_culling_accepts_visible_and_rejects_offscreen() {
+        let cam = OrbitCamera { target: [0.0, 0.0, 0.0], distance: 100.0, yaw_degrees: 0.0, pitch_degrees: 0.0, ..Default::default() };
+        let vp = cam.view_projection(1.5);
+        let f = Frustum::from_view_proj(vp, 0.0, 0.0);
+        assert!(f.intersects_aabb(Vec3::splat(-5.0), Vec3::splat(5.0)));
+        // Far behind camera (-Y is toward camera at y=-100 looking +Y).
+        assert!(!f.intersects_aabb(Vec3::new(-5.0, -500.0, -5.0), Vec3::new(5.0, -400.0, 5.0)));
+        // Far to the right outside FOV.
+        assert!(!f.intersects_aabb(Vec3::new(500.0, -5.0, -5.0), Vec3::new(510.0, 5.0, 5.0)));
+    }
+
+    #[test]
+    fn flat_vertex_packing_matches_flat_buffers_masked() {
+        let mesh = SculptMesh::from_mesh(&uv_sphere(10.0, 12, 8));
+        let (p, n, m) = mesh.flat_buffers_masked();
+        let mut staged = Vec::new();
+        fill_flat_vertices(&mut staged, &mesh);
+        assert_eq!(staged.len(), p.len());
+        for i in 0..p.len() {
+            assert_eq!(staged[i].pos, p[i].to_array());
+            assert!((Vec3::from(staged[i].nrm) - n[i]).length() < 1e-5, "normal mismatch at {i}");
+            assert_eq!(staged[i].mask, m[i]);
+        }
+    }
 }

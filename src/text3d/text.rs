@@ -8,6 +8,7 @@
 
 use super::program::*;
 use super::sdf::{summit, tight_aabb, Aabb, Compiled};
+use super::compose;
 use super::templates;
 
 /// SplitMix64, seeded from the noun so a word always gives the same model.
@@ -313,10 +314,22 @@ fn find_noun(words: &[String]) -> (Option<String>, Option<String>) {
             if templates::known(&two) {
                 return (Some(two), None);
             }
+            if let Some(c) = compose::resolve_phrase(&words[i - 1], &singular(&words[i])) {
+                return (Some(c), None);
+            }
+            if let Some(lex) = super::lexicon::resolve(&two) {
+                return (Some(lex.to_string()), None);
+            }
         }
         let s = singular(&words[i]);
         if templates::known(&s) {
             return (Some(s), None);
+        }
+        if let Some(c) = compose::resolve(&s) {
+            return (Some(c), None);
+        }
+        if let Some(lex) = super::lexicon::resolve(&s) {
+            return (Some(lex.to_string()), None);
         }
     }
     let unknown = words
@@ -328,6 +341,7 @@ fn find_noun(words: &[String]) -> (Option<String>, Option<String>) {
                 && word_index(COLORS, w).is_none()
                 && !MATERIALS.iter().any(|(k, ..)| k == &w.as_str())
                 && word_index(NUMBERS, w).is_none()
+                && !compose::is_modifier_word(w)
                 && !matches!(w.as_str(), "mm" | "cm" | "m" | "in" | "inch" | "inches" | "tall" | "high" | "stacked" | "stack" | "tower" | "pile")
         })
         .map(|w| singular(w));
@@ -371,8 +385,21 @@ fn build_noun(noun: Option<&str>, unknown: Option<&str>, seed: u32) -> Built {
         if let Some((parts, real)) = templates::build(n, &mut r) {
             return Built { obj: Object { name: title(n), parts, real_scale: real }, understood: true, note: None };
         }
+        if let Some((parts, real)) = compose::build_generalized(n, &mut r) {
+            return Built { obj: Object { name: title(n), parts, real_scale: real }, understood: true, note: None };
+        }
+        if let Some((parts, real)) = super::lexicon::build(n, &mut r) {
+            return Built { obj: Object { name: title(n), parts, real_scale: real }, understood: true, note: None };
+        }
     }
     let word = unknown.unwrap_or("shape");
+    let mut r = Rng::new(word, seed);
+    if let Some((parts, real)) = compose::build_generalized(word, &mut r) {
+        return Built { obj: Object { name: title(word), parts, real_scale: real }, understood: true, note: None };
+    }
+    if let Some((parts, real)) = super::lexicon::build(word, &mut r) {
+        return Built { obj: Object { name: title(word), parts, real_scale: real }, understood: true, note: None };
+    }
     let mut r = Rng::new(word, seed);
     if let Some((parts, real, family)) = templates::family(word, &mut r) {
         return Built {
@@ -385,10 +412,10 @@ fn build_noun(noun: Option<&str>, unknown: Option<&str>, seed: u32) -> Built {
         };
     }
     Built {
-        obj: Object { name: title(word), parts: templates::blob(&mut r), real_scale: 1.0 },
+        obj: Object { name: title(word), parts: compose::fallback_sculpture(&mut r), real_scale: 1.0 },
         understood: false,
         note: Some(format!(
-            "I don't know \"{word}\" yet, so this is a rough lump to sculpt from. Try shapes and colours (\"a blue sphere on a box\"), or turn on AI planning."
+            "I don't know \"{word}\" yet, so this is an original sculpture to sculpt from. Try shapes and colours (\"a blue sphere on a box\"), or turn on AI planning."
         )),
     }
 }
@@ -488,11 +515,15 @@ pub fn plan(prompt: &str, seed: u32) -> Plan {
         }
         let mut obj = b.obj;
         real.get_or_insert(obj.real_scale);
+        let mut mod_rng = Rng::new(&format!("{}:features", obj.name), seed);
+        compose::attach_modifiers(&mut obj.parts, main, &mut mod_rng);
         if let Some(aw) = acc_words {
             let mut am = Mods::default();
             read_mods(aw, &mut am);
             let (an, au) = find_noun(aw);
-            if an.is_some() || au.is_some() {
+            // "a cat with wings", "a robot with a halo": real 3D features, not an accessory object.
+            let features = compose::attach_features(&mut obj.parts, aw, &mut mod_rng);
+            if features == 0 && (an.is_some() || au.is_some()) {
                 let ab = build_noun(an.as_deref(), au.as_deref(), seed);
                 if let Some(n) = ab.note {
                     notes.push(n);

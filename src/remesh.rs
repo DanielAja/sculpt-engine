@@ -39,8 +39,12 @@ pub fn voxel_remesh(mesh: &SculptMesh, bvh: &Bvh, resolution: u32) -> Result<Mes
     }
     let size = bmax - bmin;
     let longest = size.max_element();
-    if !(longest > 1e-4) || !longest.is_finite() {
+    let shortest = size.min_element();
+    if !(longest > 1e-4) || !longest.is_finite() || !size.is_finite() {
         return Err("mesh bounding box is degenerate".into());
+    }
+    if !(shortest > 1e-4) {
+        return Err("cannot voxel remesh a flat or zero-volume mesh".into());
     }
 
     let mut h = longest / (res as f32);
@@ -164,6 +168,18 @@ pub fn voxel_remesh(mesh: &SculptMesh, bvh: &Bvh, resolution: u32) -> Result<Mes
                     if inside {
                         votes[k * ny * nx + xy] += 1;
                     }
+                }
+            }
+        }
+    }
+
+    // Force outer grid boundary voxels to strictly outside (vote = 0) so even open/damaged
+    // meshes produce a guaranteed closed, watertight manifold Surface Nets shell.
+    for k in 0..nz {
+        for j in 0..ny {
+            for i in 0..nx {
+                if i == 0 || i == nx - 1 || j == 0 || j == ny - 1 || k == 0 || k == nz - 1 {
+                    votes[idx(i, j, k)] = 0;
                 }
             }
         }
@@ -703,5 +719,51 @@ mod tests {
         assert!(is_manifold(&remeshed), "remeshed cube must be watertight manifold");
         let vol = signed_volume(&remeshed);
         assert!(vol > 6500.0 && vol < 9000.0, "remeshed cube volume {vol} (expected ~8000)");
+    }
+
+    #[test]
+    fn flat_plane_and_empty_mesh_return_clean_error() {
+        let empty = SculptMesh::from_mesh(&Mesh::default());
+        let empty_bvh = Bvh::build(&empty.positions, &empty.tris);
+        assert!(voxel_remesh(&empty, &empty_bvh, 24).is_err());
+
+        let plane = Mesh {
+            positions: vec![
+                Vec3::new(-10.0, -10.0, 0.0),
+                Vec3::new(10.0, -10.0, 0.0),
+                Vec3::new(10.0, 10.0, 0.0),
+                Vec3::new(-10.0, 10.0, 0.0),
+            ],
+            faces: vec![vec![0, 1, 2, 3]],
+            smooth_shading: false,
+        };
+        let sm = SculptMesh::from_mesh(&plane);
+        let bvh = Bvh::build(&sm.positions, &sm.tris);
+        let err = voxel_remesh(&sm, &bvh, 24).unwrap_err();
+        assert!(err.contains("flat") || err.contains("zero-volume"), "unexpected err: {err}");
+    }
+
+    #[test]
+    fn open_damaged_cube_repairs_into_watertight_manifold() {
+        // Cube with its entire top face (+Z) removed (open boundary hole).
+        let p = |x: f32, y: f32, z: f32| Vec3::new(x, y, z) * 10.0;
+        let open_cube = Mesh {
+            positions: vec![
+                p(-1., -1., -1.), p(1., -1., -1.), p(1., 1., -1.), p(-1., 1., -1.),
+                p(-1., -1., 1.), p(1., -1., 1.), p(1., 1., 1.), p(-1., 1., 1.),
+            ],
+            faces: vec![
+                vec![0, 3, 2, 1], // bottom
+                // top face intentionally omitted!
+                vec![0, 1, 5, 4], vec![1, 2, 6, 5], vec![2, 3, 7, 6], vec![3, 0, 4, 7],
+            ],
+            smooth_shading: false,
+        };
+        let src = SculptMesh::from_mesh(&open_cube);
+        let bvh = Bvh::build(&src.positions, &src.tris);
+        let repaired = voxel_remesh(&src, &bvh, 24).unwrap();
+        assert!(repaired.positions.iter().all(|q| q.is_finite()));
+        assert!(is_manifold(&repaired), "open damaged cube must repair into watertight manifold");
+        assert!(signed_volume(&repaired) > 5000.0);
     }
 }
