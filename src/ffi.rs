@@ -595,6 +595,25 @@ pub fn draw3d_from_points(points_xyzr: Vec<f32>, options_json: String) -> Result
         .map_err(EngineError::Invalid)
 }
 
+/// Built-in 38-shape catalog metadata as JSON array (`[{id, name, category, categoryLabel, defaultSize, tags}]`).
+#[uniffi::export]
+pub fn shape_catalog_json() -> String {
+    crate::shapes::shape_catalog_json()
+}
+
+/// Generates a watertight built-in shape `SceneCommand.addMesh` JSON by catalog `id` and optional `params_json`.
+#[uniffi::export]
+pub fn generate_shape(id: String, params_json: String) -> Result<String, EngineError> {
+    crate::shapes::generate_shape_command_json(&id, &params_json).map_err(EngineError::Invalid)
+}
+
+/// Extrudes a 2D closed outline (`[x0, y0, ...]` on the Z=0 workplane) into a watertight `SceneCommand.addMesh` JSON.
+#[uniffi::export]
+pub fn extrude_profile_2d(points_xy: Vec<f32>, options_json: String) -> Result<String, EngineError> {
+    crate::shapes::extrude_profile_2d_command_json(&points_xy, &options_json)
+        .map_err(EngineError::Invalid)
+}
+
 /// JNI entry for the Android sample: `ANativeWindow_fromSurface` (the caller releases it with the view).
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]

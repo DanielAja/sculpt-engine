@@ -505,6 +505,24 @@ pub fn draw3d_from_points(points_xyzr: &[f32], options_json: &str) -> Result<Str
         .map_err(err)
 }
 
+/// Built-in 38-shape catalog metadata as JSON array (`[{id, name, category, categoryLabel, defaultSize, tags}]`).
+#[wasm_bindgen(js_name = shapeCatalogJson)]
+pub fn shape_catalog_json() -> String {
+    crate::shapes::shape_catalog_json()
+}
+
+/// Generates a watertight built-in shape `SceneCommand.addMesh` JSON by catalog `id` and optional `paramsJson`.
+#[wasm_bindgen(js_name = generateShape)]
+pub fn generate_shape(id: &str, params_json: &str) -> Result<String, JsValue> {
+    crate::shapes::generate_shape_command_json(id, params_json).map_err(err)
+}
+
+/// Extrudes a 2D closed outline (`[x0, y0, ...]` on the Z=0 workplane) into a watertight `SceneCommand.addMesh` JSON.
+#[wasm_bindgen(js_name = extrudeProfile2d)]
+pub fn extrude_profile_2d(points_xy: &[f32], options_json: &str) -> Result<String, JsValue> {
+    crate::shapes::extrude_profile_2d_command_json(points_xy, options_json).map_err(err)
+}
+
 /// GPU-free Voxel / SDF Remesh helper: takes Sculptor Mesh JSON and returns a `setMesh` command JSON.
 #[wasm_bindgen(js_name = voxelRemeshMeshJson)]
 pub fn voxel_remesh_mesh_json(id: &str, mesh_json: &str, resolution: u32) -> Result<String, JsValue> {

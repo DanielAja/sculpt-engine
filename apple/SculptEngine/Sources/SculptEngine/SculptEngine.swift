@@ -1815,6 +1815,30 @@ public func editSplatPrompt(splatBytes: Data, prompt: String)throws  -> SplatEdi
 })
 }
 /**
+ * Extrudes a 2D closed outline (`[x0, y0, ...]` on the Z=0 workplane) into a watertight `SceneCommand.addMesh` JSON.
+ */
+public func extrudeProfile2d(pointsXy: [Float], optionsJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_func_extrude_profile_2d(
+        FfiConverterSequenceFloat.lower(pointsXy),
+        FfiConverterString.lower(optionsJson),uniffiCallStatus
+    )
+})
+}
+/**
+ * Generates a watertight built-in shape `SceneCommand.addMesh` JSON by catalog `id` and optional `params_json`.
+ */
+public func generateShape(id: String, paramsJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_func_generate_shape(
+        FfiConverterString.lower(id),
+        FfiConverterString.lower(paramsJson),uniffiCallStatus
+    )
+})
+}
+/**
  * On-device free Image-to-3D reconstruction (RGBA8 + optional depth map -> text3d-compatible JSON).
  */
 public func imageTo3d(width: UInt32, height: UInt32, rgba: Data, depth: [Float], optionsJson: String) -> String  {
@@ -1929,6 +1953,16 @@ public func renderSnapshot(objects: [SnapshotObject], cameraJson: String, width:
 })
 }
 /**
+ * Built-in 38-shape catalog metadata as JSON array (`[{id, name, category, categoryLabel, defaultSize, tags}]`).
+ */
+public func shapeCatalogJson() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_sculpt_engine_fn_func_shape_catalog_json(uniffiCallStatus
+    )
+})
+}
+/**
  * Fast O(N) radix sort of splats back-to-front relative to a camera position and forward vector.
  */
 public func sortSplats(splatBytes: Data, camPos: [Float], camForward: [Float])throws  -> [UInt32]  {
@@ -2011,6 +2045,12 @@ private let initializationResult: InitializationResult = {
     if (uniffi_sculpt_engine_checksum_func_edit_splat_prompt() != 47357) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_sculpt_engine_checksum_func_extrude_profile_2d() != 21976) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_func_generate_shape() != 11426) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_sculpt_engine_checksum_func_image_to_3d() != 52351) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -2036,6 +2076,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sculpt_engine_checksum_func_render_snapshot() != 39699) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sculpt_engine_checksum_func_shape_catalog_json() != 55123) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sculpt_engine_checksum_func_sort_splats() != 30388) {

@@ -681,6 +681,10 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_sculpt_engine_checksum_func_edit_splat_prompt(
     ): Int
+    external fun uniffi_sculpt_engine_checksum_func_extrude_profile_2d(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_generate_shape(
+    ): Int
     external fun uniffi_sculpt_engine_checksum_func_image_to_3d(
     ): Int
     external fun uniffi_sculpt_engine_checksum_func_image_to_splat(
@@ -698,6 +702,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_sculpt_engine_checksum_func_program_schema(
     ): Int
     external fun uniffi_sculpt_engine_checksum_func_render_snapshot(
+    ): Int
+    external fun uniffi_sculpt_engine_checksum_func_shape_catalog_json(
     ): Int
     external fun uniffi_sculpt_engine_checksum_func_sort_splats(
     ): Int
@@ -911,6 +917,10 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_sculpt_engine_fn_func_edit_splat_prompt(`splatBytes`: RustBuffer.ByValue,`prompt`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_extrude_profile_2d(`pointsXy`: RustBuffer.ByValue,`optionsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_generate_shape(`id`: RustBuffer.ByValue,`paramsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_sculpt_engine_fn_func_image_to_3d(`width`: Int,`height`: Int,`rgba`: RustBuffer.ByValue,`depth`: RustBuffer.ByValue,`optionsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_sculpt_engine_fn_func_image_to_splat(`width`: Int,`height`: Int,`rgba`: RustBuffer.ByValue,`depth`: RustBuffer.ByValue,`isSpace`: Byte,`maxSplats`: Int,uniffi_out_err: UniffiRustCallStatus, 
@@ -928,6 +938,8 @@ internal object UniffiLib {
     external fun uniffi_sculpt_engine_fn_func_program_schema(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_sculpt_engine_fn_func_render_snapshot(`objects`: RustBuffer.ByValue,`cameraJson`: RustBuffer.ByValue,`width`: Int,`height`: Int,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_sculpt_engine_fn_func_shape_catalog_json(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_sculpt_engine_fn_func_sort_splats(`splatBytes`: RustBuffer.ByValue,`camPos`: RustBuffer.ByValue,`camForward`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -1067,6 +1079,12 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_sculpt_engine_checksum_func_edit_splat_prompt() and 0xFFFF) != 47357) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_sculpt_engine_checksum_func_extrude_profile_2d() and 0xFFFF) != 21976) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_generate_shape() and 0xFFFF) != 11426) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_sculpt_engine_checksum_func_image_to_3d() and 0xFFFF) != 52351) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1092,6 +1110,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_sculpt_engine_checksum_func_render_snapshot() and 0xFFFF) != 39699) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_sculpt_engine_checksum_func_shape_catalog_json() and 0xFFFF) != 55123) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_sculpt_engine_checksum_func_sort_splats() and 0xFFFF) != 30388) {
@@ -3096,6 +3117,38 @@ public object FfiConverterSequenceTypeSnapshotObject: FfiConverterRustBuffer<Lis
     
 
         /**
+         * Extrudes a 2D closed outline (`[x0, y0, ...]` on the Z=0 workplane) into a watertight `SceneCommand.addMesh` JSON.
+         */
+    @Throws(EngineException::class) fun `extrudeProfile2d`(`pointsXy`: List<kotlin.Float>, `optionsJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(EngineException) { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_extrude_profile_2d(
+    
+        
+        FfiConverterSequenceFloat.lower(`pointsXy`),
+        FfiConverterString.lower(`optionsJson`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Generates a watertight built-in shape `SceneCommand.addMesh` JSON by catalog `id` and optional `params_json`.
+         */
+    @Throws(EngineException::class) fun `generateShape`(`id`: kotlin.String, `paramsJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(EngineException) { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_generate_shape(
+    
+        
+        FfiConverterString.lower(`id`),
+        FfiConverterString.lower(`paramsJson`),_status)
+}
+    )
+    }
+    
+
+        /**
          * On-device free Image-to-3D reconstruction (RGBA8 + optional depth map -> text3d-compatible JSON).
          */ fun `imageTo3d`(`width`: kotlin.UInt, `height`: kotlin.UInt, `rgba`: kotlin.ByteArray, `depth`: List<kotlin.Float>, `optionsJson`: kotlin.String): kotlin.String {
             return FfiConverterString.lift(
@@ -3235,6 +3288,19 @@ public object FfiConverterSequenceTypeSnapshotObject: FfiConverterRustBuffer<Lis
         FfiConverterString.lower(`cameraJson`),
         FfiConverterUInt.lower(`width`),
         FfiConverterUInt.lower(`height`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Built-in 38-shape catalog metadata as JSON array (`[{id, name, category, categoryLabel, defaultSize, tags}]`).
+         */ fun `shapeCatalogJson`(): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_sculpt_engine_fn_func_shape_catalog_json(
+    
+        _status)
 }
     )
     }
