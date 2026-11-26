@@ -11,19 +11,19 @@ Explore the interactive 3D benchmark visualizer at **[ajadigital.co/rust-engine.
 
 ## Headline benchmark gains
 
-On a quiet Apple M4 (4P + 4E, `rustc 1.99.1`, `--release`), every hot path in `sculpt-engine` is benchmarked in Criterion against standard baselines with output equivalence verified before timing:
+All figures below are **pure Rust kernel timings** measured with Criterion on Apple M-series silicon (`rustc 1.99.1`, `--release`, `opt-level = 3`, thin LTO), spanning quiet-machine and warm-run passes. Ranges reflect run-to-run thermal variance across independent Criterion runs; FFI and WebAssembly boundary marshaling costs are separate from these kernel figures.
 
-- **92.8x faster SDF meshing**: 128^3 Text to 3D sparse octree Surface Nets drops from `9.080 ms` to **`97.81 us`** (1% of an 8.33 ms 120 Hz frame).
-- **52.0x faster 1M triangle BVH build**: parallel Morton HLBVH drops from `249.7 ms` (sort baseline) and `82.40 ms` (partition baseline) to **`4.798 ms`**, with **`408.0 ns`** ray picks.
-- **13.2x faster project JSON I/O**: 88 MB `.sculpt` decode reaches **`17.8 GB/s`** (`4.951 ms` vs `65.43 ms` typed `serde_json`), and streaming encode reaches **`13.7 GB/s`** (`6.394 ms` vs `83.82 ms`).
-- **21.4x faster `.splat` encode and 20.7x smaller Gaussian Splats**: ARM NEON `.splat` decode runs at **`182 GB/s`** (`5.04 us` for 16k splats), radix depth sort processes 500k splats in **`427.7 us`** (`15.0x` faster), and `.dsplat` v2 packs each splat into **12 bytes** (vs 248 B SH3 `.ply`).
-- **37.4 us brush dabs and 340 fps at 1.05M triangles**: zero-allocation sculpt dabs with stamped normal updates and **`2.94 ms`** full-frame rendering at 1080p with SSAO and shadows.
+- **77x to 93x faster SDF meshing (`128^3` sparse surface)**: sparse octree Surface Nets runs in **`98 to 129 us`** vs `9.1 to 9.9 ms` for full-grid Surface Nets. The win is algorithmic and scales with grid resolution and surface sparsity (`11x to 12.3x` at `64^3`).
+- **14x to 17x faster 1M triangle BVH build**: parallel Morton HLBVH builds in **`4.8 to 6.6 ms`** vs `82.4 to 92.9 ms` for an `nth_element` median split (`39x to 52x` vs a naive full-sort baseline at `250 to 260 ms`), with **`408 to 453 ns`** ray picks.
+- **11.7x to 14.1x faster project JSON I/O (88 MB `.sculpt`)**: single-pass SIMD decode reaches **`15 to 17.8 GB/s`** (`4.95 to 5.78 ms` vs `65.4 to 79.5 ms` `serde_json` typed / `Value`), and streaming encode is **`11.7x to 13.1x`** faster (`6.39 to 7.7 ms` vs `83.8 to 89.8 ms`).
+- **37 to 52 us small brush dabs and 340 fps at 1.05M triangles**: zero-allocation sculpt dabs with stamped normal updates (`0.55 to 0.62 ms` for ~40k-vertex large footprints) and **`2.94 ms`** full-frame rendering at 1080p with SSAO and shadows.
+- **12 B/splat `.dsplat` v2 and fast cache-resident splat codecs**: `.dsplat` v2 packs each splat into **12 bytes** (`20.7x` smaller than 248 B SH3 `.ply`). On an L1/L2 cache-resident `512 KB` buffer (16k splats), NEON decode runs in **`5.04 to 6.7 us`** (`10.8x` vs an inline scalar reference in the bench; the crate's `from_splat_bytes` runs in `7.3 us`, `.dsplat` v2 compact decode in `8.96 us`), and radix depth sort runs in **`13.1 to 14.1 us`** (16k) / **`427.7 us`** (500k, `15.0x` vs std sort).
 
 ---
 
 ## Run the benchmarks yourself
 
-Do not take our numbers on faith. Every benchmark in this README lives directly in [`benches/core.rs`](benches/core.rs) with built-in equivalence assertions, so you can verify and profile them on your own CPU in a couple of minutes:
+Do not take our numbers on faith. Every benchmark in this README lives directly in [`benches/core.rs`](benches/core.rs), so you can verify and profile them on your own CPU in a couple of minutes:
 
 ```bash
 git clone https://github.com/DanielAja/sculpt-engine.git
@@ -32,9 +32,11 @@ cargo test --release --lib
 cargo bench --bench core -- vs_industry_standard
 ```
 
-You can also run individual benchmark groups:
+You can also run individual benchmark groups or save a local Criterion baseline to gate regressions across commits:
 
 ```bash
+cargo bench --bench core -- --save-baseline main
+cargo bench --bench core -- --baseline main
 cargo bench --bench core -- sculpt_format
 cargo bench --bench core -- text3d
 cargo bench --bench core -- img3d_and_splat
@@ -45,22 +47,23 @@ If you run `cargo bench` on x86_64 (AVX2/AVX-512), AMD Ryzen, Apple M1/M2/M3/M4,
 
 ---
 
-## Full Criterion table (Apple M4)
+## Full Criterion table (Apple Silicon, pure Rust kernels)
 
-Measured on a quiet Apple M4 (4P + 4E, macOS 27.0, `rustc 1.99.1`, `--release` with `opt-level = 3` and thin LTO) using identical inputs and output equivalence checks before timing:
+Measured on Apple M-series silicon (`rustc 1.99.1`, `--release`, `opt-level = 3`, thin LTO). Ranges combine quiet-machine M4 measurements with independent warm-machine verification runs:
 
 | Workload | `sculpt-engine` | Reference baseline | Speedup |
 | --- | --- | --- | --- |
-| Text to 3D SDF meshing (128^3 grid) | **97.81 us** | 9.080 ms (full-grid Surface Nets) | **92.8x** |
-| 1M triangle BVH build (parallel Morton HLBVH) | **4.798 ms** | 82.40 ms partition / 249.7 ms sort | **17.2x / 52.0x** |
-| 1M triangle ray pick (SIMD FMA slab test) | **408.0 ns** | 913.0 ns (v1 scalar) | **2.24x** |
-| 88 MB `.sculpt` project JSON decode | **4.951 ms** (17.8 GB/s) | 65.43 ms typed / 79.5 ms `serde_json::Value` | **13.2x / 16.1x** |
-| 88 MB `.sculpt` project JSON encode | **6.394 ms** (13.7 GB/s) | 83.82 ms `serde_json` | **13.1x** |
-| 16k `.splat` encode | **5.57 us** | 119.38 us scalar | **21.4x** |
-| 16k `.splat` decode (ARM NEON) | **5.04 us** (182 GB/s) | 54.28 us scalar | **10.8x** |
-| 16k `.dsplat` v2 compact encode | **5.47 us** (12 B/splat) | 60.75 us scalar / 248 B SH3 `.ply` | **11.1x** (20.7x smaller) |
-| 500k Gaussian Splat depth sort (radix) | **427.7 us** | 6.406 ms std sort / 1.288 ms radix v1 | **15.0x / 3.01x** |
-| Brush dab (small footprint, ~2.5k verts) | **37.4 us** | 75.8 us (v1) | **2.03x** |
+| Text to 3D SDF meshing (`128^3`, sparse surface) | **98 to 129 us** | 9.1 to 9.9 ms (full-grid Surface Nets) | **77x to 93x** |
+| Text to 3D SDF meshing (`64^3`, sparse surface) | **88 to 114 us** | 1.08 to 1.26 ms (full-grid Surface Nets) | **11x to 12.3x** |
+| 1M triangle BVH build (parallel Morton HLBVH) | **4.8 to 6.6 ms** | 82.4 to 92.9 ms `nth_element` split (250 to 260 ms full sort) | **14x to 17x** (39x to 52x vs full sort) |
+| 1M triangle ray pick (SIMD FMA slab test) | **408 to 453 ns** | 913.0 ns (v1 scalar) | **2.0x to 2.24x** |
+| 88 MB `.sculpt` project JSON decode | **4.95 to 5.78 ms** (15 to 17.8 GB/s) | 65.4 ms typed / 79.5 ms `serde_json::Value` | **11.7x to 14.1x** |
+| 88 MB `.sculpt` project JSON encode | **6.39 to 7.7 ms** (11.4 to 13.7 GB/s) | 83.8 to 89.8 ms `serde_json` | **11.7x to 13.1x** |
+| 16k `.splat` encode (L1/L2 cache-resident) | **5.57 us** | 119.38 us inline scalar ref | **21.4x** |
+| 16k `.splat` NEON decode (512 KB, L1/L2 cache-resident) | **5.04 to 6.7 us** (`from_splat_bytes`: 7.3 us) | 54.28 us inline scalar ref | **10.8x** vs inline scalar |
+| 16k `.dsplat` v2 compact encode / decode (12 B/splat) | **5.47 us** encode / **8.96 us** decode | 60.75 us inline scalar / 248 B SH3 `.ply` | **11.1x** encode (**20.7x** smaller) |
+| 16k / 500k Gaussian Splat radix depth sort | **13.1 to 14.1 us** / **427.7 us** | 167.2 us / 6.406 ms std sort | **11.8x to 15.0x** |
+| Brush dab (small ~2.5k verts / large ~40k verts) | **37 to 52 us** / **0.55 to 0.62 ms** | 75.8 us / 1.30 ms (v1) | **1.5x to 2.0x** |
 | 1.05M triangle full frame (1080p, SSAO + shadows) | **2.94 ms** (340 fps) | 8.33 ms 120 Hz budget | **65% headroom** |
 
 ---
